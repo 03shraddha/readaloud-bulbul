@@ -24,6 +24,10 @@ export const TICK_INTERVAL_MS = 250;
 // --- Persistence ---
 export const PROGRESS_SAVE_DEBOUNCE_MS = 2000;
 export const MAX_PROGRESS_ENTRIES = 200;
+// How long a chrome.storage.local session snapshot (ra.session) stays
+// eligible for lazy service-worker-restart recovery before it's treated as
+// stale and discarded. See src/background/session.js recoverSessionForTab().
+export const SESSION_SNAPSHOT_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 // --- Extraction ---
 export const EXTRACT_MORE_TIMEOUT_MS = 8000;

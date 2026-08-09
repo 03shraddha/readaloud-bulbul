@@ -9,6 +9,17 @@ it with the automated pieces:
   (message catalog, sentence splitting, content-key derivation). Run this any time
   `src/shared/*` changes; it should print `All shared-contract invariants hold.`
   and exit 0.
+- `node test/harness/session-recovery-check.mjs` — asserts the lazy
+  service-worker-restart recovery path in `src/background/session.js`
+  (`recoverSessionForTab()` / `resolveCurrent()`): a fresh snapshot is
+  recovered as `paused`, a stale (past-TTL) or closed-tab snapshot is
+  discarded, and a `CONTROL_*` message arriving with the content script's
+  pre-restart `sessionId` recovers `current` instead of being silently
+  dropped. Uses an in-memory `chrome.storage.local`/`chrome.tabs` stub (no
+  real extension runtime needed). Run this any time
+  `src/background/{session,persistence,service-worker}.js` changes; it
+  should print `All service-worker-restart recovery invariants hold.` and
+  exit 0.
 
 Everything below is manual, because it depends on the real Chrome extension
 runtime (`chrome.storage`, `chrome.tabs`, content-script injection, the offscreen

@@ -16,7 +16,7 @@
  */
 
 import { MSG, TARGET, makeEnvelope, safeSendTabMessage } from '../shared/messages.js';
-import { RATES } from '../shared/constants.js';
+import { RATES, SESSION_SNAPSHOT_TTL_MS } from '../shared/constants.js';
 import { createLogger } from '../shared/logger.js';
 import { PrefetchQueue } from './prefetch-queue.js';
 import * as offscreenManager from './offscreen-manager.js';
@@ -533,6 +533,94 @@ function requireCurrent(incomingSessionId, tabId) {
   return current;
 }
 
+// ---------------------------------------------------------------------------
+// Lazy service-worker-restart recovery (see shared_contracts §7).
+//
+// MV3 idles the service worker out (commonly within ~30s of inactivity),
+// which wipes this module's `current` singleton. That is far more common
+// than a full browser restart, so recovery is done LAZILY here -- on the
+// next message that actually needs `current` -- rather than eagerly via
+// chrome.runtime.onStartup (which only fires on browser restart and would
+// miss this case entirely).
+//
+// recoverSessionForTab() is the ONE place that turns a persisted
+// SessionSnapshot back into a live Session; resolveCurrent() is the ONE
+// place every requireCurrent()-style caller goes through so there is a
+// single source of truth for "how do we get the current session" -- both
+// direct CONTROL_* handlers and the REQUEST_STATE / getPlaybackStateFor
+// flow recover through it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Attempts to rebuild `current` for `tabId` from the persisted session
+ * snapshot. Never throws -- any failure (no snapshot, stale snapshot, tab
+ * gone) is treated as "nothing to recover" and the stale snapshot (if any)
+ * is cleaned up so it isn't retried forever.
+ * @param {number|null} tabId
+ * @returns {Promise<Session|null>}
+ */
+async function recoverSessionForTab(tabId) {
+  if (tabId == null) return null;
+
+  const snapshot = await persistence.readSessionSnapshot();
+  if (!snapshot || snapshot.tabId !== tabId) return null;
+
+  const age = Date.now() - (snapshot.updatedAt || 0);
+  if (age > SESSION_SNAPSHOT_TTL_MS) {
+    log.debug('discarding stale session snapshot', { tabId, ageMs: age });
+    persistence.clearSessionSnapshot().catch((err) => log.error('clearSessionSnapshot (stale) failed', err));
+    return null;
+  }
+
+  try {
+    await chrome.tabs.get(tabId);
+  } catch (err) {
+    log.debug('snapshot tab no longer exists, discarding snapshot', tabId, err?.message);
+    persistence.clearSessionSnapshot().catch((clearErr) => log.error('clearSessionSnapshot (gone tab) failed', clearErr));
+    return null;
+  }
+
+  const recovered = new Session({ sessionId: snapshot.sessionId, tabId });
+  recovered.contentKey = snapshot.contentKey;
+  recovered.cursor = snapshot.index;
+  recovered.rate = snapshot.rate;
+  // Re-establish as 'paused' -- never auto-resume audio off a bare SW
+  // restart. This just unblocks the next CONTROL_* (e.g. the user pressing
+  // play again) or the existing CONTENT_READY -> RESUME_AVAILABLE prompt
+  // from silently no-op'ing against a null `current`.
+  recovered.status = 'paused';
+
+  current = recovered;
+  log.info('recovered session from snapshot after service-worker restart', {
+    tabId,
+    sessionId: recovered.sessionId,
+    index: recovered.cursor,
+  });
+  return recovered;
+}
+
+/**
+ * Async counterpart to requireCurrent(): returns the in-memory session if
+ * it already satisfies (incomingSessionId, tabId), otherwise -- only when
+ * there is currently no session at all for this tab -- tries the lazy
+ * snapshot recovery above and re-checks. Returns null (never throws) if
+ * nothing usable is found, matching requireCurrent()'s contract.
+ * @param {string|null} incomingSessionId
+ * @param {number|null} tabId
+ * @returns {Promise<Session|null>}
+ */
+async function resolveCurrent(incomingSessionId, tabId) {
+  const existing = requireCurrent(incomingSessionId, tabId);
+  if (existing) return existing;
+  // A session IS active, just not this one/tab -- not our business to recover.
+  if (current) return null;
+
+  const recovered = await recoverSessionForTab(tabId);
+  if (!recovered) return null;
+
+  return requireCurrent(incomingSessionId, tabId);
+}
+
 /**
  * @param {import('../shared/types.js').StartReadingPayload} payload
  * @param {number|null} tabId
@@ -559,45 +647,79 @@ export function handleStartReading(payload, tabId, incomingSessionId) {
 /**
  * @param {import('../shared/types.js').AppendUnitsPayload} payload
  * @param {string|null} incomingSessionId
+ * @param {number|null} [tabId]
  */
-export function handleAppendUnits(payload, incomingSessionId) {
-  requireCurrent(incomingSessionId)?.appendUnits(payload);
+export async function handleAppendUnits(payload, incomingSessionId, tabId = null) {
+  (await resolveCurrent(incomingSessionId, tabId))?.appendUnits(payload);
 }
 
-export function handleControlPlay(incomingSessionId) {
-  requireCurrent(incomingSessionId)?.handleControlPlay();
+/**
+ * @param {string|null} incomingSessionId
+ * @param {number|null} [tabId]
+ */
+export async function handleControlPlay(incomingSessionId, tabId = null) {
+  (await resolveCurrent(incomingSessionId, tabId))?.handleControlPlay();
 }
 
-export function handleControlPause(incomingSessionId) {
-  requireCurrent(incomingSessionId)?.handleControlPause();
+/**
+ * @param {string|null} incomingSessionId
+ * @param {number|null} [tabId]
+ */
+export async function handleControlPause(incomingSessionId, tabId = null) {
+  (await resolveCurrent(incomingSessionId, tabId))?.handleControlPause();
 }
 
-export function handleControlToggle(incomingSessionId) {
-  requireCurrent(incomingSessionId)?.handleControlToggle();
+/**
+ * @param {string|null} incomingSessionId
+ * @param {number|null} [tabId]
+ */
+export async function handleControlToggle(incomingSessionId, tabId = null) {
+  (await resolveCurrent(incomingSessionId, tabId))?.handleControlToggle();
 }
 
 /**
  * @param {string|null} incomingSessionId
  * @param {'user-stop'|'completed'|'navigation'|'error'} [reason]
+ * @param {number|null} [tabId]
  */
-export function handleControlStop(incomingSessionId, reason = 'user-stop') {
-  requireCurrent(incomingSessionId)?.handleControlStop(reason);
+export async function handleControlStop(incomingSessionId, reason = 'user-stop', tabId = null) {
+  (await resolveCurrent(incomingSessionId, tabId))?.handleControlStop(reason);
 }
 
-export function handleControlSkip(payload, incomingSessionId) {
-  requireCurrent(incomingSessionId)?.handleControlSkip(payload);
+/**
+ * @param {import('../shared/types.js').ControlSkipPayload} payload
+ * @param {string|null} incomingSessionId
+ * @param {number|null} [tabId]
+ */
+export async function handleControlSkip(payload, incomingSessionId, tabId = null) {
+  (await resolveCurrent(incomingSessionId, tabId))?.handleControlSkip(payload);
 }
 
-export function handleControlSeek(payload, incomingSessionId) {
-  requireCurrent(incomingSessionId)?.handleControlSeek(payload);
+/**
+ * @param {import('../shared/types.js').ControlSeekPayload} payload
+ * @param {string|null} incomingSessionId
+ * @param {number|null} [tabId]
+ */
+export async function handleControlSeek(payload, incomingSessionId, tabId = null) {
+  (await resolveCurrent(incomingSessionId, tabId))?.handleControlSeek(payload);
 }
 
-export function handleControlSetRate(payload, incomingSessionId) {
-  requireCurrent(incomingSessionId)?.handleControlSetRate(payload);
+/**
+ * @param {import('../shared/types.js').ControlSetRatePayload} payload
+ * @param {string|null} incomingSessionId
+ * @param {number|null} [tabId]
+ */
+export async function handleControlSetRate(payload, incomingSessionId, tabId = null) {
+  (await resolveCurrent(incomingSessionId, tabId))?.handleControlSetRate(payload);
 }
 
-export function handleHighlightResult(payload, incomingSessionId) {
-  requireCurrent(incomingSessionId)?.handleHighlightResult(payload);
+/**
+ * @param {import('../shared/types.js').HighlightResultPayload} payload
+ * @param {string|null} incomingSessionId
+ * @param {number|null} [tabId]
+ */
+export async function handleHighlightResult(payload, incomingSessionId, tabId = null) {
+  (await resolveCurrent(incomingSessionId, tabId))?.handleHighlightResult(payload);
 }
 
 export function handleSentenceStarted(payload) {
@@ -626,13 +748,21 @@ export function handlePlaybackError(payload) {
 
 /**
  * REQUEST_STATE handler. Ignores sessionId (a fresh widget boot legitimately
- * doesn't know one yet) but scopes to the requesting tab when known.
+ * doesn't know one yet) but scopes to the requesting tab when known. This is
+ * the "normal getSessionSnapshot flow" that recoverSessionForTab() also
+ * backs -- a widget re-querying state right after a service-worker restart
+ * gets the recovered (paused) state instead of a false 'idle', through the
+ * same recovery path CONTROL_* uses (see resolveCurrent() above).
  * @param {number|null} tabId
- * @returns {import('../shared/types.js').PlaybackState}
+ * @returns {Promise<import('../shared/types.js').PlaybackState>}
  */
-export function getPlaybackStateFor(tabId) {
+export async function getPlaybackStateFor(tabId) {
   if (current && (tabId == null || current.tabId === tabId)) {
     return current.getPlaybackState();
+  }
+  if (!current && tabId != null) {
+    const recovered = await recoverSessionForTab(tabId);
+    if (recovered) return recovered.getPlaybackState();
   }
   return idlePlaybackState();
 }

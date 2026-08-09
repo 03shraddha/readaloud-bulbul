@@ -53,35 +53,35 @@ function handleMessage(env, sender, sendResponse) {
       return undefined;
 
     case MSG.APPEND_UNITS:
-      session.handleAppendUnits(env.payload, env.sessionId);
+      session.handleAppendUnits(env.payload, env.sessionId, tabId);
       return undefined;
 
     case MSG.CONTROL_PLAY:
-      session.handleControlPlay(env.sessionId);
+      session.handleControlPlay(env.sessionId, tabId);
       return undefined;
 
     case MSG.CONTROL_PAUSE:
-      session.handleControlPause(env.sessionId);
+      session.handleControlPause(env.sessionId, tabId);
       return undefined;
 
     case MSG.CONTROL_TOGGLE:
-      session.handleControlToggle(env.sessionId);
+      session.handleControlToggle(env.sessionId, tabId);
       return undefined;
 
     case MSG.CONTROL_STOP:
-      session.handleControlStop(env.sessionId, 'user-stop');
+      session.handleControlStop(env.sessionId, 'user-stop', tabId);
       return undefined;
 
     case MSG.CONTROL_SKIP:
-      session.handleControlSkip(env.payload, env.sessionId);
+      session.handleControlSkip(env.payload, env.sessionId, tabId);
       return undefined;
 
     case MSG.CONTROL_SEEK:
-      session.handleControlSeek(env.payload, env.sessionId);
+      session.handleControlSeek(env.payload, env.sessionId, tabId);
       return undefined;
 
     case MSG.CONTROL_SET_RATE:
-      session.handleControlSetRate(env.payload, env.sessionId);
+      session.handleControlSetRate(env.payload, env.sessionId, tabId);
       return undefined;
 
     case MSG.CONTROL_SET_OPTION:
@@ -89,11 +89,11 @@ function handleMessage(env, sender, sendResponse) {
       return undefined;
 
     case MSG.REQUEST_STATE:
-      sendResponse(session.getPlaybackStateFor(tabId));
+      session.getPlaybackStateFor(tabId).then(sendResponse);
       return true;
 
     case MSG.HIGHLIGHT_RESULT:
-      session.handleHighlightResult(env.payload, env.sessionId);
+      session.handleHighlightResult(env.payload, env.sessionId, tabId);
       return undefined;
 
     case MSG.RESUME_DECISION: {
