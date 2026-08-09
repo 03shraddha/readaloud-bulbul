@@ -16,7 +16,10 @@
  *  - Forward PLAYBACK_STATE / CLEAR_HIGHLIGHT / RESUME_AVAILABLE /
  *    SESSION_ENDED / TOAST to the widget.
  *  - Forward widget control callbacks to the background as CONTROL_*.
- *  - Tear down on pagehide and on SPA URL change (X pushState).
+ *  - Tear down on pagehide and on SPA URL change (X pushState); an SPA
+ *    navigation also sends CONTROL_STOP so the background session actually
+ *    ends (same path as the widget's own Stop button) instead of being left
+ *    running against a view the content script has already discarded.
  *
  * main.js imports the widget, highlighter, and extractors ONLY through
  * their published interfaces (dynamic import of web-accessible module
@@ -385,13 +388,27 @@ function teardown() {
 }
 
 function watchForSpaNavigation() {
-  // X/Twitter is a pushState SPA; re-check the URL periodically and on the
-  // popstate event so a session-per-view teardown/rebind can happen later.
+  // X/Twitter is a pushState SPA. checkUrl only ever runs from the patched
+  // pushState below and the popstate listener, so ordinary same-document
+  // scroll/hash-only DOM activity (which fires neither) can't trigger this;
+  // it only reacts to an actual location.href change, i.e. a real navigation.
   const checkUrl = () => {
     if (location.href !== lastUrl) {
       const previousUrl = lastUrl;
       lastUrl = location.href;
       log.debug('SPA navigation detected', { from: previousUrl, to: lastUrl });
+
+      // Local teardown alone only clears this content script's own state;
+      // the background session (session.js) has no other way to learn the
+      // view it's reading just disappeared. Tell it via the same CONTROL_STOP
+      // the widget's Stop button sends, so it ends the session the normal
+      // way (SESSION_ENDED/CLEAR_HIGHLIGHT flow back as usual) instead of
+      // being left running against a torn-down view. No-op background-side
+      // if there's no active session (or it belongs to a different tab).
+      if (sessionId) {
+        sendControl(MSG.CONTROL_STOP);
+      }
+
       teardown();
     }
   };
