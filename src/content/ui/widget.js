@@ -669,7 +669,20 @@ const defaultExport = {
   mount: (...args) => ensureSingleton().mount(...args),
   // Never creates a widget just to immediately tear it down — if there's no
   // singleton, there's nothing mounted, so unmounting is already satisfied.
-  unmount: (...args) => peekSingleton()?.unmount(...args),
+  //
+  // This is content/main.js's teardown() entry point (pagehide, X/Twitter
+  // pushState navigation, and the pre-mount teardown in handleActivate), and
+  // teardown means "everything this content script put on the page goes
+  // away". The resume banner lives in its own Shadow DOM root, outside the
+  // full widget's singleton, so it has to be dismissed explicitly here —
+  // otherwise a "Resume reading?" offer for the *previous* X view survives an
+  // SPA navigation and answers with a now-stale contentKey. Dropping the
+  // offer without sending a RESUME_DECISION is exactly what the banner's own
+  // "x" button does, so the background is never left waiting on it.
+  unmount: (...args) => {
+    peekSingleton()?.unmount(...args);
+    resumeBanner?.unmount();
+  },
   render: (...args) => ensureSingleton().render(...args),
   showTextFallback: (...args) => ensureSingleton().showTextFallback(...args),
   toast: (...args) => ensureSingleton().toast(...args),
