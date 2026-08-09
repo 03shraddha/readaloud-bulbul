@@ -6,21 +6,17 @@
  * gradient (GRADIENT_FROM/GRADIENT_TO) for the progress bar and active
  * accents, no external fonts/assets, respects prefers-color-scheme and
  * prefers-reduced-motion. No Sarvam name/logo/wordmark/monogram anywhere.
+ *
+ * Also exports `getResumeBannerStyles()` for the small standalone
+ * "Resume reading?" banner (its own Shadow DOM root, separate from the full
+ * player widget — see widget.js `createResumeBanner`). It shares the same
+ * color palette / `:host` variables so the two feel like one visual system
+ * even though they never mount at the same time in the same tree.
  */
 
 import { GRADIENT_FROM, GRADIENT_TO, WIDGET_Z_INDEX } from '../../shared/constants.js';
 
-export function getWidgetStyles() {
-  return `
-:host {
-  all: initial;
-  position: fixed;
-  z-index: ${WIDGET_Z_INDEX};
-  top: auto;
-  left: auto;
-  right: 20px;
-  bottom: 20px;
-  display: block;
+const HOST_VARIABLES_CSS = `
   color-scheme: light dark;
   --cadence-grad-from: ${GRADIENT_FROM};
   --cadence-grad-to: ${GRADIENT_TO};
@@ -33,17 +29,33 @@ export function getWidgetStyles() {
   --cadence-danger: #d1483f;
   --cadence-warn: #b5730a;
   --cadence-info: #2F6BFF;
-}
+`;
+
+const HOST_VARIABLES_DARK_CSS = `
+  --cadence-bg: #1c1e24;
+  --cadence-bg-elevated: #262932;
+  --cadence-text: #f2f3f5;
+  --cadence-text-muted: #a7abb6;
+  --cadence-border: rgba(255, 255, 255, 0.12);
+  --cadence-shadow: 0 8px 30px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
+`;
+
+export function getWidgetStyles() {
+  return `
+:host {
+  all: initial;
+  position: fixed;
+  z-index: ${WIDGET_Z_INDEX};
+  top: auto;
+  left: auto;
+  right: 20px;
+  bottom: 20px;
+  display: block;
+${HOST_VARIABLES_CSS}}
 
 @media (prefers-color-scheme: dark) {
   :host {
-    --cadence-bg: #1c1e24;
-    --cadence-bg-elevated: #262932;
-    --cadence-text: #f2f3f5;
-    --cadence-text-muted: #a7abb6;
-    --cadence-border: rgba(255, 255, 255, 0.12);
-    --cadence-shadow: 0 8px 30px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
-  }
+${HOST_VARIABLES_DARK_CSS}  }
 }
 
 * {
@@ -349,64 +361,6 @@ export function getWidgetStyles() {
   pointer-events: none;
 }
 
-/* ---- Resume prompt ---- */
-.cadence-resume {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--cadence-border);
-  background: var(--cadence-bg-elevated);
-}
-
-.cadence-resume[hidden] {
-  display: none;
-}
-
-.cadence-resume-title {
-  font-weight: 600;
-  font-size: 12.5px;
-  margin-bottom: 4px;
-}
-
-.cadence-resume-preview {
-  color: var(--cadence-text-muted);
-  font-size: 12px;
-  margin-bottom: 8px;
-  max-height: 3.6em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cadence-resume-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.cadence-btn {
-  all: unset;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 12px;
-  border-radius: 8px;
-  text-align: center;
-  flex: 1 1 auto;
-}
-
-.cadence-btn--primary {
-  color: #fff;
-  background: linear-gradient(135deg, var(--cadence-grad-from), var(--cadence-grad-to));
-}
-
-.cadence-btn--secondary {
-  color: var(--cadence-text);
-  background: transparent;
-  border: 1px solid var(--cadence-border);
-}
-
-.cadence-btn:focus-visible {
-  outline: 2px solid var(--cadence-grad-from);
-  outline-offset: 1px;
-}
-
 /* ---- Toasts ---- */
 .cadence-toasts {
   position: absolute;
@@ -467,6 +421,133 @@ export function getWidgetStyles() {
   .cadence-switch,
   .cadence-switch::after,
   .cadence-toast {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+`;
+}
+
+/**
+ * Styles for the small standalone "Resume reading?" banner (its own Shadow
+ * DOM root — see widget.js `createResumeBanner`). Deliberately NOT the
+ * `.cadence-widget` card: smaller, no header/drag-handle/controls, so it
+ * reads as a lightweight prompt rather than the full player.
+ */
+export function getResumeBannerStyles() {
+  return `
+:host {
+  all: initial;
+  position: fixed;
+  z-index: ${WIDGET_Z_INDEX};
+  top: auto;
+  left: auto;
+  right: 20px;
+  bottom: 20px;
+  display: block;
+${HOST_VARIABLES_CSS}}
+
+@media (prefers-color-scheme: dark) {
+  :host {
+${HOST_VARIABLES_DARK_CSS}  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.cadence-resume-banner {
+  position: relative;
+  width: 260px;
+  max-width: calc(100vw - 24px);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--cadence-text);
+  background: var(--cadence-bg);
+  border: 1px solid var(--cadence-border);
+  border-radius: 12px;
+  box-shadow: var(--cadence-shadow);
+  padding: 12px 14px;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.cadence-resume-banner-close {
+  all: unset;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--cadence-text-muted);
+  cursor: pointer;
+}
+
+.cadence-resume-banner-close:hover {
+  background: var(--cadence-border);
+  color: var(--cadence-text);
+}
+
+.cadence-resume-banner-close:focus-visible {
+  outline: 2px solid var(--cadence-grad-from);
+  outline-offset: 1px;
+}
+
+.cadence-resume-banner-title {
+  font-weight: 600;
+  font-size: 12.5px;
+  padding-right: 20px;
+  margin-bottom: 4px;
+}
+
+.cadence-resume-banner-preview {
+  color: var(--cadence-text-muted);
+  font-size: 12px;
+  margin-bottom: 10px;
+  max-height: 3.6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cadence-resume-banner-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cadence-btn {
+  all: unset;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  text-align: center;
+  flex: 1 1 auto;
+}
+
+.cadence-btn--primary {
+  color: #fff;
+  background: linear-gradient(135deg, var(--cadence-grad-from), var(--cadence-grad-to));
+}
+
+.cadence-btn--secondary {
+  color: var(--cadence-text);
+  background: transparent;
+  border: 1px solid var(--cadence-border);
+}
+
+.cadence-btn:focus-visible {
+  outline: 2px solid var(--cadence-grad-from);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cadence-resume-banner * {
     transition: none !important;
     animation: none !important;
   }
