@@ -1,0 +1,17 @@
+{
+  "name": "cadence-reader",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Root manifest for dev ergonomics only. The Chrome extension itself has no build step and is loaded unpacked directly from this repo; this package.json exists solely to run the local mock/real TTS backend and a syntax-check script.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "backend": "node backend/server.js",
+    "backend:mock": "MOCK_TTS=1 node backend/server.js",
+    "check": "node scripts/check-syntax.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
