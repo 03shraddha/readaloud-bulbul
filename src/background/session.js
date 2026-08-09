@@ -475,8 +475,19 @@ class Session {
     offscreenManager.sendToOffscreen(makeEnvelope(MSG.AUDIO_STOP, TARGET.OFFSCREEN, this.sessionId, {}));
     offscreenManager.closeOffscreenDocument();
 
-    persistence.flushProgress(this).catch((err) => log.error('flushProgress on end failed', err));
-    persistence.clearSessionSnapshot().catch((err) => log.error('clearSessionSnapshot on end failed', err));
+    // These two MUST be sequenced, not fired in parallel: flushProgress()
+    // ends by writing a fresh SessionSnapshot, and chrome.storage.local
+    // .remove() resolves in fewer turns than putProgress()+putSessionSnapshot,
+    // so a parallel clear lands FIRST and the snapshot gets written straight
+    // back afterwards. That leftover snapshot used to be inert; now that
+    // recoverSessionForTab() exists it would resurrect this just-ended session
+    // as 'paused' on the next CONTROL_*/REQUEST_STATE for the tab, for a whole
+    // SESSION_SNAPSHOT_TTL_MS.
+    persistence
+      .flushProgress(this)
+      .catch((err) => log.error('flushProgress on end failed', err))
+      .then(() => persistence.clearSessionSnapshot())
+      .catch((err) => log.error('clearSessionSnapshot on end failed', err));
     persistence.cancelProgressSave(this.sessionId);
 
     // Omitting sentenceId clears every highlight (shared_contracts §3).

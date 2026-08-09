@@ -184,10 +184,25 @@ export async function flushProgress(session) {
     debounceTimers.delete(session.sessionId);
   }
 
-  try {
-    await putProgress(buildProgressRecord(session));
-  } catch (err) {
-    log.error('putProgress failed', err);
+  // A session that never ingested any content has nothing worth persisting,
+  // and buildProgressRecord() would produce a record with kind/url/title/
+  // contentHash nulled and totalSentences 0 — actively WORSE than whatever is
+  // already stored under this contentKey. That is exactly the shape of a
+  // session rebuilt by session.js's recoverSessionForTab(): the snapshot
+  // carries only sessionId/tabId/contentKey/index/status/rate, so a
+  // CONTROL_PAUSE or CONTROL_STOP arriving right after a service-worker
+  // restart would otherwise overwrite the real ProgressRecord with a stub
+  // (dropping contentHash => the next resume offer is refused as "this
+  // article changed", and dropping readStatusIds on X). Skip the write; the
+  // cursor it would save is the one it was just restored FROM.
+  if (session.totalSentences > 0) {
+    try {
+      await putProgress(buildProgressRecord(session));
+    } catch (err) {
+      log.error('putProgress failed', err);
+    }
+  } else {
+    log.debug('skipping progress write for a session with no ingested content', session.contentKey);
   }
 
   await saveSessionSnapshot(session);
