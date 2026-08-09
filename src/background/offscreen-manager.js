@@ -133,9 +133,12 @@ async function createDocumentIfNeeded() {
  * every enqueue — cheap when nothing needs to change.
  * @param {string} sessionId
  * @param {number} rate
+ * @param {number} [startIndex] - the Sentence.index this session starts at;
+ *   forwarded on OFFSCREEN_INIT so the audio queue seeds its cursor rather
+ *   than inferring it from whichever sentence happens to synthesize first.
  * @returns {Promise<void>}
  */
-export async function ensureOffscreenReady(sessionId, rate) {
+export async function ensureOffscreenReady(sessionId, rate, startIndex) {
   // Session start fires several concurrent calls (one per in-flight prefetch
   // plus one from beginPlayback). Without this single-flight guard each one
   // would independently observe "no document yet" and send its own
@@ -150,12 +153,18 @@ export async function ensureOffscreenReady(sessionId, rate) {
   ensurePromise = (async () => {
     const existed = await hasDocument();
 
+    const safeStartIndex = Number.isFinite(startIndex) ? Math.max(0, Math.floor(startIndex)) : 0;
+
     if (!existed) {
       await createDocumentIfNeeded();
       await waitUntilReady();
       lastInit = { sessionId, rate };
       await safeSendRuntimeMessage(
-        makeEnvelope(MSG.OFFSCREEN_INIT, TARGET.OFFSCREEN, sessionId, { sessionId, rate })
+        makeEnvelope(MSG.OFFSCREEN_INIT, TARGET.OFFSCREEN, sessionId, {
+          sessionId,
+          rate,
+          startIndex: safeStartIndex,
+        })
       );
       return;
     }
@@ -163,7 +172,11 @@ export async function ensureOffscreenReady(sessionId, rate) {
     if (!lastInit || lastInit.sessionId !== sessionId) {
       lastInit = { sessionId, rate };
       await safeSendRuntimeMessage(
-        makeEnvelope(MSG.OFFSCREEN_INIT, TARGET.OFFSCREEN, sessionId, { sessionId, rate })
+        makeEnvelope(MSG.OFFSCREEN_INIT, TARGET.OFFSCREEN, sessionId, {
+          sessionId,
+          rate,
+          startIndex: safeStartIndex,
+        })
       );
     }
   })();

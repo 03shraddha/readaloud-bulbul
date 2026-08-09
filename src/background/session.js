@@ -196,7 +196,7 @@ class Session {
     this.emitPlaybackState();
 
     this.prefetchQueue.start(this.cursor);
-    offscreenManager.ensureOffscreenReady(this.sessionId, this.rate).then(() => {
+    offscreenManager.ensureOffscreenReady(this.sessionId, this.rate, this.cursor).then(() => {
       offscreenManager.sendToOffscreen(makeEnvelope(MSG.AUDIO_PLAY, TARGET.OFFSCREEN, this.sessionId, {}));
     });
 
@@ -288,13 +288,21 @@ class Session {
    * @param {number} newIndex
    */
   seekTo(newIndex) {
-    this.cursor = newIndex;
+    // Seeking past the end of finished content would leave the prefetch queue
+    // waiting on a sentence that can never arrive (`exhausted` means no
+    // APPEND_UNITS is coming), stranding the session in 'buffering' forever.
+    let target = Math.max(0, newIndex);
+    if (this.exhausted && this.totalSentences > 0) {
+      target = Math.min(target, this.totalSentences - 1);
+    }
+
+    this.cursor = target;
 
     offscreenManager.sendToOffscreen(
-      makeEnvelope(MSG.AUDIO_FLUSH, TARGET.OFFSCREEN, this.sessionId, { fromIndex: newIndex })
+      makeEnvelope(MSG.AUDIO_FLUSH, TARGET.OFFSCREEN, this.sessionId, { fromIndex: target })
     );
 
-    this.prefetchQueue.start(newIndex);
+    this.prefetchQueue.start(target);
 
     if (this.status !== 'paused' && this.status !== 'stopped') {
       this.status = 'buffering';

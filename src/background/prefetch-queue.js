@@ -175,7 +175,11 @@ export class PrefetchQueue {
     );
 
     this.abortAll();
-    this.dispatched = this.dispatched.filter((i) => i < resumeFrom);
+    // AUDIO_FLUSH drops everything offscreen was holding, including whatever
+    // was playing, so no dispatched index will ever report SENTENCE_ENDED —
+    // keeping any of them here would permanently inflate queuedAhead and
+    // starve fill().
+    this.dispatched = [];
     this.nextToFetch = resumeFrom;
     this.expectedOffscreenCursor = resumeFrom;
     this.awaitingMoreUnits = false;
@@ -252,7 +256,7 @@ export class PrefetchQueue {
 
     try {
       const settings = persistence.getCachedSettings() || {};
-      await offscreenManager.ensureOffscreenReady(session.sessionId, session.rate);
+      await offscreenManager.ensureOffscreenReady(session.sessionId, session.rate, session.cursor);
 
       const result = await synthesizeSentence({ sentence, settings, signal: controller.signal });
 

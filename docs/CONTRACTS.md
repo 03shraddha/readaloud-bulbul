@@ -219,6 +219,14 @@ warning, advance.
   in-flight, and drops all in-flight work on skip/seek/stop.
 - Offscreen plays strictly in ascending `index`; out-of-order arrivals wait for
   their predecessor; anything with `index < currentIndex` is discarded.
+- `OFFSCREEN_INIT` carries `startIndex` — the offscreen cursor is seeded from it,
+  never inferred from whichever sentence synthesizes first (background dispatches
+  in completion order, not index order).
+- `AUDIO_FLUSH{fromIndex}` drops **everything** offscreen holds — queued clips,
+  the preloaded clip, and the clip playing right now regardless of its index —
+  then sets the cursor to `fromIndex`. This is what makes skip-forward stop the
+  current sentence's audio immediately instead of letting it run on past the
+  highlight.
 - `audio.playbackRate = rate; audio.preservesPitch = true` on both buffers.
 - `QUEUE_DRAINED` + `exhausted:false` → `REQUEST_MORE_UNITS`, status `buffering`.
   `exhausted:true` → session ends with reason `completed`.

@@ -8,6 +8,7 @@
  * (`node backend/server.js`).
  */
 
+import { pathToFileURL } from 'node:url';
 import express from 'express';
 import { config, isMockMode } from './config.js';
 import { corsMiddleware } from './lib/cors.js';
@@ -98,7 +99,10 @@ function logStartupWarnings() {
   }
 }
 
-const isMainModule = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+// NB: must go through pathToFileURL — `file://` + argv[1] does not percent-encode,
+// so any space in the repo path (e.g. ".../Sarvam Work/...") would make this
+// comparison silently false and the server would exit 0 without ever listening.
+const isMainModule = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMainModule) {
   logStartupWarnings();

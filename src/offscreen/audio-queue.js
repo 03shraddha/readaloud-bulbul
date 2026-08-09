@@ -98,10 +98,21 @@ export class AudioQueue {
   // Public API — invoked by offscreen.js message handlers
   // ---------------------------------------------------------------------
 
-  /** OFFSCREEN_INIT: full reset for a brand-new session. */
-  reset(rate) {
+  /**
+   * OFFSCREEN_INIT: full reset for a brand-new session.
+   *
+   * `startIndex` is the session's starting Sentence.index. It MUST be honored:
+   * background dispatches prefetched sentences in COMPLETION order, not index
+   * order, so if the cursor were left null and sentence N+1 happened to
+   * synthesize before sentence N, _pump() would take the lowest pending index
+   * (N+1), pin the cursor there, and sentence N would then be discarded by the
+   * `index < cursor` stale check when it finally arrived.
+   * @param {number} [rate]
+   * @param {number} [startIndex]
+   */
+  reset(rate, startIndex) {
     this._stopInternal();
-    this.cursor = null;
+    this.cursor = typeof startIndex === 'number' && Number.isFinite(startIndex) ? startIndex : null;
     this.wantsPlay = false;
     this._lastBufferLowCount = null;
     this.setRate(typeof rate === 'number' ? rate : 1.0);
@@ -194,27 +205,34 @@ export class AudioQueue {
   }
 
   /**
-   * AUDIO_FLUSH{fromIndex}: drop queued items with index >= fromIndex AND
-   * abort the currently playing clip when its index >= fromIndex.
+   * AUDIO_FLUSH{fromIndex}: playback is being repositioned to `fromIndex`.
+   *
+   * Everything currently held is dropped — queued items, the preloaded clip,
+   * AND the clip playing right now, whatever its index. Stopping the current
+   * clip unconditionally is what makes skip-forward audible immediately
+   * (shared_contracts §9: "drops all in-flight work on skip/seek/stop"); if
+   * the playing clip were allowed to run to its end, its audio would keep
+   * going while the background cursor — and therefore the highlight — had
+   * already moved on.
    * @param {number} fromIndex
    */
   flush(fromIndex) {
     if (typeof fromIndex !== 'number') return;
 
+    // Nothing below the new cursor can ever play again, so keeping any of it
+    // would just leak object URLs.
     for (const [idx, item] of Array.from(this.pending.entries())) {
-      if (idx >= fromIndex) {
-        this._revoke(item.url);
-        this.pending.delete(idx);
-      }
+      this._revoke(item.url);
+      this.pending.delete(idx);
     }
 
-    if (this.preload && this.preload.index >= fromIndex) {
+    if (this.preload) {
       this._resetElement(this.preload.el);
       this._revoke(this.preload.url);
       this.preload = null;
     }
 
-    if (this.current && this.current.index >= fromIndex) {
+    if (this.current) {
       const el = this.current.el;
       try {
         el.pause();
@@ -224,15 +242,10 @@ export class AudioQueue {
       this._resetElement(el);
       this._revoke(this.current.url);
       this.current = null;
-      // Whatever arrives next legitimately starts at fromIndex.
-      this.cursor = fromIndex;
-    } else if (this.current) {
-      // Current survives the flush (its index is below the cut line) —
-      // keep the cursor anchored to it.
-      this.cursor = this.current.index;
-    } else {
-      this.cursor = fromIndex;
     }
+
+    // Whatever arrives next legitimately starts at fromIndex.
+    this.cursor = fromIndex;
 
     this._pump();
   }

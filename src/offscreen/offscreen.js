@@ -35,11 +35,15 @@ const queue = createAudioQueue({
   },
 });
 
-/** @param {{sessionId:string|null, payload:{sessionId:string,rate:number}}} env */
+/** @param {{sessionId:string|null, payload:import('../shared/types.js').OffscreenInitPayload}} env */
 function handleInit(env) {
   sessionId = env.sessionId ?? env.payload?.sessionId ?? null;
-  queue.reset(env.payload?.rate);
-  log.debug('OFFSCREEN_INIT', { sessionId, rate: env.payload?.rate });
+  queue.reset(env.payload?.rate, env.payload?.startIndex);
+  log.debug('OFFSCREEN_INIT', {
+    sessionId,
+    rate: env.payload?.rate,
+    startIndex: env.payload?.startIndex,
+  });
 }
 
 /**

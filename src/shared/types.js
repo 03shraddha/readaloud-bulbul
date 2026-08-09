@@ -252,6 +252,9 @@
  * @typedef {Object} OffscreenInitPayload
  * @property {string} sessionId
  * @property {number} rate
+ * @property {number} startIndex - the Sentence.index playback starts at; the
+ *   offscreen queue seeds its cursor with this so an out-of-order first
+ *   arrival can't strand the true first sentence.
  */
 
 /**
