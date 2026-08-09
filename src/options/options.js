@@ -130,6 +130,9 @@ async function loadFormFromSettings() {
   const settings = await getSettings();
 
   els.backendBaseUrl.value = settings.backendBaseUrl;
+  // Last-known-good value, used to roll back the field if a permission
+  // prompt for a new origin is denied (see ensureBackendPermission below).
+  els.backendBaseUrl.dataset.lastValid = settings.backendBaseUrl;
   populateRateOptions(settings.rate);
   populateLanguageOptions(settings.languageCode);
   els.speaker.value = settings.speaker;
@@ -178,13 +181,84 @@ async function save(patch) {
 }
 
 // ---------------------------------------------------------------------------
+// Host permissions for non-default backend origins
+//
+// host_permissions only ever grants http://localhost:8787/* out of the box
+// (manifest.json), so the mock/dev backend works with zero clicks. Any other
+// origin (a different port, a LAN IP, a deployed proxy) lives in
+// optional_host_permissions and must be requested at runtime via
+// chrome.permissions.request before we fetch it from here or let the
+// background service worker (tts-client.js) use it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the origin match pattern chrome.permissions needs for a backend
+ * base URL, e.g. "https://tts.example.com:9443/*".
+ * @param {string} urlString
+ * @returns {string|null} null if urlString isn't a parseable absolute URL
+ */
+function originPatternFor(urlString) {
+  try {
+    const u = new URL(urlString);
+    return `${u.protocol}//${u.host}/*`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Make sure we hold host permission for `urlString`'s origin, prompting the
+ * user via chrome.permissions.request if it isn't already covered by
+ * host_permissions or a prior optional-permission grant. Never prompts twice
+ * for the same origin — chrome.permissions.contains() short-circuits once
+ * granted.
+ * @param {string} urlString
+ * @returns {Promise<{ok:true}|{ok:false, error:string}>}
+ */
+async function ensureBackendPermission(urlString) {
+  const pattern = originPatternFor(urlString);
+  if (!pattern) {
+    return { ok: false, error: 'Enter a valid URL, e.g. http://localhost:8787.' };
+  }
+
+  try {
+    const alreadyGranted = await chrome.permissions.contains({ origins: [pattern] });
+    if (alreadyGranted) return { ok: true };
+
+    const granted = await chrome.permissions.request({ origins: [pattern] });
+    if (!granted) {
+      return {
+        ok: false,
+        error: `Permission for ${pattern} was denied — keeping the previous backend URL.`,
+      };
+    }
+    return { ok: true };
+  } catch (err) {
+    log.error('permission request failed', err);
+    return { ok: false, error: 'Could not request permission for that URL — see console.' };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Wiring
 // ---------------------------------------------------------------------------
 
 function wireFormEvents() {
-  els.backendBaseUrl.addEventListener('change', () => {
+  els.backendBaseUrl.addEventListener('change', async () => {
     const value = els.backendBaseUrl.value.trim() || els.backendBaseUrl.placeholder;
+    const previous = els.backendBaseUrl.dataset.lastValid || value;
     els.backendBaseUrl.value = value;
+
+    if (value === previous) return;
+
+    const permission = await ensureBackendPermission(value);
+    if (!permission.ok) {
+      els.backendBaseUrl.value = previous;
+      setConnectionStatus(permission.error, 'error');
+      return;
+    }
+
+    els.backendBaseUrl.dataset.lastValid = value;
     save({ backendBaseUrl: value });
   });
 
@@ -249,6 +323,13 @@ async function testConnection() {
   const base = (els.backendBaseUrl.value || els.backendBaseUrl.placeholder).trim().replace(/\/+$/, '');
   els.testConnectionBtn.disabled = true;
   setConnectionStatus('Checking&hellip;', 'pending');
+
+  const permission = await ensureBackendPermission(base);
+  if (!permission.ok) {
+    setConnectionStatus(permission.error, 'error');
+    els.testConnectionBtn.disabled = false;
+    return;
+  }
 
   try {
     const controller = new AbortController();
