@@ -1,0 +1,20 @@
+{
+  "name": "cadence-backend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Node 20 + Express TTS proxy wrapping Sarvam Bulbul v3, with a dependency-free MOCK_TTS mode.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:mock": "MOCK_TTS=1 node server.js",
+    "test": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {}
+}

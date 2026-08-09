@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cadence Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <h1>Cadence</h1>
+          <p class="tagline">Read-aloud settings</p>
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+      <!-- Backend section -->
+      <section class="card" aria-labelledby="backend-heading">
+        <h2 id="backend-heading">Backend</h2>
+        <p class="hint">The local proxy that talks to the speech-synthesis service.</p>
+
+        <div class="field">
+          <label for="backendBaseUrl">Backend base URL</label>
+          <div class="row">
+            <input
+              type="url"
+              id="backendBaseUrl"
+              name="backendBaseUrl"
+              placeholder="http://localhost:8787"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button type="button" id="testConnectionBtn" class="btn btn-secondary">Test connection</button>
+          </div>
+          <div id="connectionStatus" class="status" role="status" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <!-- Voice section -->
+      <section class="card" aria-labelledby="voice-heading">
+        <h2 id="voice-heading">Voice &amp; playback</h2>
+
+        <div class="grid">
+          <div class="field">
+            <label for="rate">Default speed</label>
+            <select id="rate" name="rate"></select>
+          </div>
+
+          <div class="field">
+            <label for="languageCode">Language</label>
+            <select id="languageCode" name="languageCode"></select>
+          </div>
+
+          <div class="field">
+            <label for="speaker">Speaker</label>
+            <input type="text" id="speaker" name="speaker" list="speakerOptions" autocomplete="off" spellcheck="false" />
+            <datalist id="speakerOptions"></datalist>
+          </div>
+
+          <div class="field">
+            <label for="pace">Pace <span class="value-readout" id="paceReadout"></span></label>
+            <input type="range" id="pace" name="pace" min="0.5" max="2.0" step="0.05" />
+          </div>
+
+          <div class="field">
+            <label for="temperature">Temperature <span class="value-readout" id="temperatureReadout"></span></label>
+            <input type="range" id="temperature" name="temperature" min="0.01" max="2.0" step="0.01" />
+          </div>
+
+          <div class="field">
+            <label for="highlightStyle">Highlight style</label>
+            <select id="highlightStyle" name="highlightStyle">
+              <option value="gradient">Gradient</option>
+              <option value="solid">Solid</option>
+              <option value="underline">Underline</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Reading behavior -->
+      <section class="card" aria-labelledby="behavior-heading">
+        <h2 id="behavior-heading">Reading behavior</h2>
+
+        <label class="toggle-row" for="autoScroll">
+          <span>
+            <span class="toggle-title">Auto-scroll</span>
+            <span class="toggle-desc">Keep the page scrolled to the sentence being read.</span>
+          </span>
+          <input type="checkbox" id="autoScroll" name="autoScroll" />
+        </label>
+
+        <label class="toggle-row" for="skipPromoted">
+          <span>
+            <span class="toggle-title">Skip promoted tweets</span>
+            <span class="toggle-desc">When off, promoted tweets are announced as &ldquo;Sponsored&rdquo; instead of skipped.</span>
+          </span>
+          <input type="checkbox" id="skipPromoted" name="skipPromoted" />
+        </label>
+
+        <label class="toggle-row" for="announceRetweets">
+          <span>
+            <span class="toggle-title">Announce retweets</span>
+            <span class="toggle-desc">Say who retweeted before reading the tweet.</span>
+          </span>
+          <input type="checkbox" id="announceRetweets" name="announceRetweets" />
+        </label>
+      </section>
+
+      <!-- Danger zone -->
+      <section class="card card-danger" aria-labelledby="danger-heading">
+        <h2 id="danger-heading">Reading positions</h2>
+        <p class="hint">
+          Cadence remembers where you left off on articles and X timelines so it can offer to
+          resume. <span id="progressCount"></span>
+        </p>
+        <button type="button" id="clearProgressBtn" class="btn btn-danger">
+          Clear all saved reading positions
+        </button>
+        <div id="clearProgressStatus" class="status" role="status" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div id="saveStatus" class="save-status" role="status" aria-live="polite"></div>
+    </footer>
+  </div>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

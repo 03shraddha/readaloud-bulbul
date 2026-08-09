@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>X Timeline Fixture — Cadence T3</title>
+<meta name="description" content="Static mock of X/Twitter timeline markup using real data-testid attributes, for exercising the Cadence twitter extractor (T3). Loadable via file:// or a static server." />
+<style>
+  /* Cosmetic only — layout approximation of x.com, not a functional clone. */
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #000; color: #e7e9ea; margin: 0; }
+  [data-testid="primaryColumn"] { max-width: 600px; margin: 0 auto; }
+  article[data-testid="tweet"] { border-bottom: 1px solid #2f3336; padding: 12px 16px; display: flex; gap: 10px; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: #333; flex-shrink: 0; }
+  .tweet-body { flex: 1; min-width: 0; }
+  [data-testid="socialContext"] { font-size: 13px; color: #71767b; margin-bottom: 4px; }
+  [data-testid="User-Name"] { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; font-size: 15px; }
+  [data-testid="User-Name"] .display-name { font-weight: 700; color: #e7e9ea; }
+  [data-testid="User-Name"] .handle,
+  [data-testid="User-Name"] time { color: #71767b; }
+  [data-testid="tweetText"] { font-size: 15px; line-height: 1.4; margin: 4px 0; white-space: pre-wrap; }
+  .thread-rail { border-left: 2px solid #2f3336; margin-left: 20px; padding-left: 18px; }
+  .quoted-tweet { border: 1px solid #2f3336; border-radius: 12px; padding: 10px; margin-top: 8px; }
+  [data-testid="cardPoll"] { border: 1px solid #2f3336; border-radius: 12px; padding: 10px; margin-top: 8px; }
+  .poll-option { position: relative; border: 1px solid #536471; border-radius: 4px; padding: 6px 8px; margin: 4px 0; overflow: hidden; }
+  .poll-option .fill { position: absolute; top: 0; left: 0; bottom: 0; background: #1d3244; z-index: 0; }
+  .poll-option .label { position: relative; z-index: 1; display: flex; justify-content: space-between; }
+  .poll-meta { font-size: 13px; color: #71767b; margin-top: 6px; }
+  .link-card { border: 1px solid #2f3336; border-radius: 12px; overflow: hidden; margin-top: 8px; display: flex; flex-direction: column; }
+  .link-card img { width: 100%; display: block; background: #222; height: 140px; object-fit: cover; }
+  .link-card .card-meta { padding: 10px; }
+  .link-card .card-domain { font-size: 13px; color: #71767b; }
+  .link-card .card-title { font-size: 15px; font-weight: 600; }
+  [data-testid="placementTracking"] { font-size: 12px; color: #71767b; margin-top: 6px; }
+  .actions { display: flex; gap: 28px; margin-top: 8px; color: #71767b; font-size: 13px; }
+  .show-more { color: #1d9bf0; cursor: pointer; }
+  .section-label { color: #71767b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; padding: 16px 16px 4px; }
+</style>
+</head>
+<body>
+
+  <div data-testid="primaryColumn">
+    <div aria-label="Timeline: Your Home Timeline" role="region">
+
+      <!-- ============================================================ -->
+      <!-- Case A: a 3-tweet same-author thread (statuses 1001-1003)     -->
+      <!-- ============================================================ -->
+      <div class="section-label">Case A — same-author thread</div>
+
+      <div data-testid="cellInnerDiv">
+        <article data-testid="tweet" role="article" tabindex="0" aria-labelledby="tweet-1001">
+          <div class="avatar" aria-hidden="true"></div>
+          <div class="tweet-body">
+            <div data-testid="User-Name">
+              <span class="display-name">Ada Fixture</span>
+              <span class="handle">@ada_fixture</span>
+              <span aria-hidden="true">&middot;</span>
+              <a href="/ada_fixture/status/1001">
+                <time datetime="2024-03-01T12:00:00.000Z">Mar 1</time>
+              </a>
+            </div>
+            <div data-testid="tweetText" lang="en">
+              Thread time: three things nobody tells you about maintaining old infrastructure. 1/3
+            </div>
+            <div class="actions" aria-hidden="true"><span>12</span><span>4</span><span>88</span></div>
+          </div>
+        </article>
+      </div>
+
+      <div class="thread-rail">
+        <div data-testid="cellInnerDiv">
+          <article data-testid="tweet" role="article" tabindex="0" aria-labelledby="tweet-1002">
+            <div class="avatar" aria-hidden="true"></div>
+            <div class="tweet-body">
+              <div data-testid="User-Name">
+                <span class="display-name">Ada Fixture</span>
+                <span class="handle">@ada_fixture</span>
+                <span aria-hidden="true">&middot;</span>
+                <a href="/ada_fixture/status/1002">
+                  <time datetime="2024-03-01T12:01:00.000Z">Mar 1</time>
+                </a>
+              </div>
+              <div data-testid="tweetText" lang="en">
+                First: the budget for keeping something running is never as exciting as the budget
+                for building it, so it gets cut first. 2/3
+              </div>
+              <div class="actions" aria-hidden="true"><span>6</span><span>2</span><span>51</span></div>
+            </div>
+          </article>
+        </div>
+
+        <div data-testid="cellInnerDiv">
+          <article data-testid="tweet" role="article" tabindex="0" aria-labelledby="tweet-1003">
+            <div class="avatar" aria-hidden="true"></div>
+            <div class="tweet-body">
+              <div data-testid="User-Name">
+                <span class="display-name">Ada Fixture</span>
+                <span class="handle">@ada_fixture</span>
+                <span aria-hidden="true">&middot;</span>
+                <a href="/ada_fixture/status/1003">
+                  <time datetime="2024-03-01T12:02:00.000Z">Mar 1</time>
+                </a>
+              </div>
+              <div data-testid="tweetText" lang="en">
+                Second: nobody throws a parade for the inspection that found nothing wrong. 3/3, more
+                on this Friday.
+              </div>
+              <div class="actions" aria-hidden="true"><span>9</span><span>3</span><span>64</span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- Case B: a retweet (status 2001, original author Sam Original) -->
+      <!-- ============================================================ -->
+      <div class="section-label">Case B — retweet</div>
+
+      <div data-testid="cellInnerDiv">
+        <article data-testid="tweet" role="article" tabindex="0" aria-labelledby="tweet-2001">
+          <div class="avatar" aria-hidden="true"></div>
+          <div class="tweet-body">
+            <div data-testid="socialContext">
+              <span aria-hidden="true">&#x1F501;</span> Rae Reposter reposted
+            </div>
+            <div data-testid="User-Name">
+              <span class="display-name">Sam Original</span>
+              <span class="handle">@sam_original</span>
+              <span aria-hidden="true">&middot;</span>
+              <a href="/sam_original/status/2001">
+                <time datetime="2024-02-27T09:15:00.000Z">Feb 27</time>
+              </a>
+            </div>
+            <div data-testid="tweetText" lang="en">
+              Hot take: the most important commit in any repo is the one that deletes dead code, and
+              it never gets a demo.
+            </div>
+            <div class="actions" aria-hidden="true"><span>44</span><span>210</span><span>1.2K</span></div>
+          </div>
+        </article>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- Case C: a quote tweet (quoting status 3001, quote is 3002)    -->
+      <!-- ============================================================ -->
+      <div class="section-label">Case C — quote tweet</div>
+
+      <div data-testid="cellInnerDiv">
+        <article data-testid="tweet" role="article" tabindex="0" aria-labelledby="tweet-3002">
+          <div class="avatar" aria-hidden="true"></div>
+          <div class="tweet-body">
+            <div data-testid="User-Name">
+              <span class="display-name">Q. Quoter</span>
+              <span class="handle">@q_quoter</span>
+              <span aria-hidden="true">&middot;</span>
+              <a href="/q_quoter/status/3002">
+                <time datetime="2024-03-02T18:40:00.000Z">Mar 2</time>
+              </a>
+            </div>
+            <div data-testid="tweetText" lang="en">
+              This is exactly why our on-call rotation has a standing item called "delete something."
+            </div>
+
+            <div class="quoted-tweet" role="link" tabindex="0">
+              <div data-testid="User-Name">
+                <span class="display-name">Sam Original</span>
+                <span class="handle">@sam_original</span>
+                <span aria-hidden="true">&middot;</span>
+                <a href="/sam_original/status/3001">
+                  <time datetime="2024-03-02T09:00:00.000Z">Mar 2</time>
+                </a>
+              </div>
+              <div data-testid="tweetText" lang="en">
+                Hot take: the most important commit in any repo is the one that deletes dead code.
+              </div>
+            </div>
+
+            <div class="actions" aria-hidden="true"><span>3</span><span>18</span><span>140</span></div>
+          </div>
+        </article>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- Case D: a promoted tweet (status 4001)                        -->
+      <!-- ============================================================ -->
+      <div class="section-label">Case D — promoted tweet</div>
+
+      <div data-testid="cellInnerDiv">
+        <article data-testid="tweet" role="article" tabindex="0" aria-labelledby="tweet-4001">
+          <div class="avatar" aria-hidden="true"></div>
+          <div class="tweet-body">
+            <div data-testid="socialContext">Promoted</div>
+            <div data-testid="User-Name">
+              <span class="display-name">Brand Co</span>
+              <span class="handle">@brandco</span>
+              <span aria-hidden="true">&middot;</span>
+              <a href="/brandco/status/4001">
+                <time datetime="2024-03-01T00:00:00.000Z">Mar 1</time>
+              </a>
+            </div>
+            <div data-testid="tweetText" lang="en">
+              Tired of flaky infrastructure? Our uptime monitor pings you before your users notice.
+              Try it free for 14 days.
+            </div>
+            <div class="actions" aria-hidden="true"><span>1</span><span>0</span><span>2</span></div>
+            <!-- Real X wraps promoted-only tracking/engagement in a
+                 data-testid="placementTracking" node near the action bar. -->
+            <div data-testid="placementTracking"></div>
+          </div>
+        </article>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- Case E: a poll (status 5001)                                   -->
+      <!-- ============================================================ -->
+      <div class="section-label">Case E — poll</div>
+
+      <div data-testid="cellInnerDiv">
+        <article data-testid="tweet" role="article" tabindex="0" aria-labelledby="tweet-5001">
+          <div class="avatar" aria-hidden="true"></div>
+          <div class="tweet-body">
+            <div data-testid="User-Name">
+              <span class="display-name">Ada Fixture</span>
+              <span class="handle">@ada_fixture</span>
+              <span aria-hidden="true">&middot;</span>
+              <a href="/ada_fixture/status/5001">
+                <time datetime="2024-03-03T10:00:00.000Z">Mar 3</time>
+              </a>
+            </div>
+            <div data-testid="tweetText" lang="en">
+              Quick poll: what breaks a maintenance culture fastest?
+            </div>
+            <div data-testid="cardPoll">
+              <div class="poll-option">
+                <div class="fill" style="width: 52%;"></div>
+                <div class="label"><span>No budget separation</span><span>52%</span></div>
+              </div>
+              <div class="poll-option">
+                <div class="fill" style="width: 31%;"></div>
+                <div class="label"><span>No authority to halt work</span><span>31%</span></div>
+              </div>
+              <div class="poll-option">
+                <div class="fill" style="width: 12%;"></div>
+                <div class="label"><span>No inspection logs</span><span>12%</span></div>
+              </div>
+              <div class="poll-option">
+                <div class="fill" style="width: 5%;"></div>
+                <div class="label"><span>Something else</span><span>5%</span></div>
+              </div>
+              <div class="poll-meta">1,204 votes &middot; Final results</div>
+            </div>
+            <div class="actions" aria-hidden="true"><span>7</span><span>5</span><span>90</span></div>
+          </div>
+        </article>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- Case F: a link card (status 6001)                              -->
+      <!-- ============================================================ -->
+      <div class="section-label">Case F — link card</div>
+
+      <div data-testid="cellInnerDiv">
+        <article data-testid="tweet" role="article" tabindex="0" aria-labelledby="tweet-6001">
+          <div class="avatar" aria-hidden="true"></div>
+          <div class="tweet-body">
+            <div data-testid="User-Name">
+              <span class="display-name">Sam Original</span>
+              <span class="handle">@sam_original</span>
+              <span aria-hidden="true">&middot;</span>
+              <a href="/sam_original/status/6001">
+                <time datetime="2024-03-04T08:20:00.000Z">Mar 4</time>
+              </a>
+            </div>
+            <div data-testid="tweetText" lang="en">
+              Wrote up why nobody funds the boring middle of the failure curve:
+            </div>
+            <a class="link-card" href="https://fixturegazette.example/quiet-discipline-of-maintenance" target="_blank" rel="noopener">
+              <img src="bathtub-curve-thumb.svg" alt="" />
+              <div class="card-meta">
+                <div class="card-domain">fixturegazette.example</div>
+                <div class="card-title">The Quiet Discipline of Maintenance</div>
+              </div>
+            </a>
+            <div class="actions" aria-hidden="true"><span>15</span><span>22</span><span>301</span></div>
+          </div>
+        </article>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- Case G: a "Show more" truncated tweet (status 7001)            -->
+      <!-- ============================================================ -->
+      <div class="section-label">Case G — truncated tweet ("Show more")</div>
+
+      <div data-testid="cellInnerDiv">
+        <article data-testid="tweet" role="article" tabindex="0" aria-labelledby="tweet-7001">
+          <div class="avatar" aria-hidden="true"></div>
+          <div class="tweet-body">
+            <div data-testid="User-Name">
+              <span class="display-name">Ada Fixture</span>
+              <span class="handle">@ada_fixture</span>
+              <span aria-hidden="true">&middot;</span>
+              <a href="/ada_fixture/status/7001">
+                <time datetime="2024-03-05T14:00:00.000Z">Mar 5</time>
+              </a>
+            </div>
+            <div data-testid="tweetText" lang="en">
+              Longer thought on maintenance budgets, deferred cost traps, and why auditors keep
+              flagging the same line item every single year even though everyone agrees it matters
+              and nobody ever&hellip;
+              <span data-testid="tweet-text-show-more-link" class="show-more" role="button" tabindex="0">Show more</span>
+            </div>
+            <div class="actions" aria-hidden="true"><span>2</span><span>1</span><span>19</span></div>
+          </div>
+        </article>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>

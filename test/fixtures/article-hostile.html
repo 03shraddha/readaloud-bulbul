@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Adversarial Extraction Cases — Fixture Gazette</title>
+<meta name="description" content="Adversarial DOM cases for exercising the Cadence article extractor's visibility/order handling (T2)." />
+<style>
+  body { font-family: Georgia, serif; max-width: 900px; margin: 0 auto; padding: 24px; color: #222; }
+  h1 { font-size: 22px; }
+  section.case { border: 1px dashed #bbb; border-radius: 8px; padding: 16px; margin: 20px 0; }
+  section.case h2 { margin-top: 0; font-size: 15px; font-family: -apple-system, sans-serif; color: #444; }
+  section.case .expect { font-size: 12px; font-family: -apple-system, sans-serif; color: #888; margin-bottom: 10px; }
+
+  /* Case 1: plain display:none (classic hidden SEO stuffing) */
+  .seo-hidden { display: none; }
+
+  /* Case 3: visually-hidden "clip-rect" trick — NOT display:none, NOT
+     aria-hidden, but rendered with zero visible area. This is the same
+     technique used both for legitimate sr-only accessibility text AND for
+     abusive hidden SEO text, which is exactly why it is an adversarial case:
+     an extractor must apply the same "not actually visible" rule regardless
+     of which intent produced it. */
+  .clip-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Case 4: flex `order` that inverts visual order relative to DOM order. */
+  .order-flip {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #f7f7f7;
+    padding: 10px;
+    border-radius: 6px;
+  }
+  .order-flip .visual-first { order: 1; }
+  .order-flip .visual-second { order: 2; }
+
+  iframe.case-iframe {
+    width: 100%;
+    height: 90px;
+    border: 1px solid #ccc;
+  }
+</style>
+</head>
+<body>
+
+  <h1>Adversarial Extraction Cases</h1>
+  <p>
+    This fixture is not a normal article — it is a gauntlet of DOM patterns that a naive
+    content extractor gets wrong. Each numbered section below is independently checkable.
+    Real prose is included in each case so a correct extractor's output can be read back
+    and judged for sense, not just for absence of noise.
+  </p>
+
+  <article class="main-content">
+
+    <section class="case" data-case="display-none-seo">
+      <h2>Case 1 — <code>display:none</code> hidden SEO text</h2>
+      <p class="expect">Expect: the hidden paragraph below must NOT be read aloud.</p>
+      <p>This visible paragraph is the real content of case one and should be read normally.</p>
+      <p class="seo-hidden">
+        Hidden keyword stuffing paragraph: buy cheap widgets online best widget store widget
+        discount widget sale. This text is display:none and exists only to manipulate search
+        rankings; it must never reach the speech queue.
+      </p>
+    </section>
+
+    <section class="case" data-case="aria-hidden">
+      <h2>Case 2 — <code>aria-hidden="true"</code> blocks</h2>
+      <p class="expect">Expect: the aria-hidden paragraph is visually rendered but must be
+        treated as hidden from assistive tech, and therefore skipped, exactly like a screen
+        reader would skip it.</p>
+      <p>This visible paragraph is the real content of case two and should be read normally.</p>
+      <p aria-hidden="true">
+        This paragraph is marked aria-hidden="true". It has ordinary CSS and is fully visible
+        on screen, but assistive technology — including this extension — must not announce it.
+      </p>
+      <div aria-hidden="true">
+        <p>A whole aria-hidden subtree, to confirm the exclusion is inherited by descendants
+        and not just the element the attribute is set on.</p>
+      </div>
+    </section>
+
+    <section class="case" data-case="clip-rect-offscreen">
+      <h2>Case 3 — off-screen &ldquo;clip-rect&rdquo; paragraph</h2>
+      <p class="expect">Expect: this paragraph has non-zero <code>offsetWidth/offsetHeight</code>
+        (1px&times;1px) but zero effective visible area via <code>clip: rect(0,0,0,0)</code>.
+        It must be excluded — checking <code>display</code>/<code>visibility</code> alone is not
+        sufficient.</p>
+      <p>This visible paragraph is the real content of case three and should be read normally.</p>
+      <p class="clip-hidden">
+        This paragraph is clipped to a zero-area rectangle. It is a real accessibility technique
+        (sr-only text) that some sites also abuse for hidden SEO content; an extractor should treat
+        it as not visible either way.
+      </p>
+    </section>
+
+    <section class="case" data-case="flex-order-inversion">
+      <h2>Case 4 — CSS flex <code>order</code> inverts visual vs. DOM order</h2>
+      <p class="expect">Expect: the extractor emits sentences in DOM/reading order — &ldquo;Paragraph
+        A&rdquo; before &ldquo;Paragraph B&rdquo; — even though <code>order</code> makes B appear
+        above A on screen.</p>
+      <div class="order-flip">
+        <p class="visual-second">Paragraph A: this is first in the DOM (source order) but is
+        pushed to appear SECOND on screen because its CSS <code>order</code> is 2.</p>
+        <p class="visual-first">Paragraph B: this is second in the DOM (source order) but is
+        pulled to appear FIRST on screen because its CSS <code>order</code> is 1.</p>
+      </div>
+    </section>
+
+    <section class="case" data-case="open-shadow-dom">
+      <h2>Case 5 — open shadow root with real content</h2>
+      <p class="expect">Expect: the paragraph inside the shadow root IS extracted — an
+        <code>{mode:'open'}</code> shadow root is fully walkable via
+        <code>element.shadowRoot</code>, unlike a closed one.</p>
+      <p>This visible paragraph is the real content of case five and should be read normally.</p>
+      <div id="shadow-host" data-role="shadow-host"></div>
+      <script>
+        (function attachOpenShadowRoot() {
+          var host = document.getElementById('shadow-host');
+          var shadow = host.attachShadow({ mode: 'open' });
+          var style = document.createElement('style');
+          style.textContent = '.shadow-para { font-family: -apple-system, sans-serif; }';
+          var p = document.createElement('p');
+          p.className = 'shadow-para';
+          p.textContent =
+            'This paragraph lives entirely inside an open shadow root attached at runtime, ' +
+            'not in the light DOM, and should still be discoverable by an extractor that ' +
+            'walks shadow trees explicitly.';
+          shadow.appendChild(style);
+          shadow.appendChild(p);
+        })();
+      </script>
+    </section>
+
+    <section class="case" data-case="same-origin-iframe">
+      <h2>Case 6 — same-origin iframe</h2>
+      <p class="expect">Expect: the extractor MAY reach into this iframe's
+        <code>contentDocument</code> (accessible, same-origin via <code>srcdoc</code>) and
+        extract its paragraph, or may deliberately skip all iframes for simplicity — either
+        behavior is acceptable, but attempting access must not throw.</p>
+      <iframe
+        class="case-iframe"
+        title="Same-origin iframe (srcdoc)"
+        srcdoc="<p style=&quot;font-family:sans-serif;margin:8px;&quot;>This paragraph is rendered inside a same-origin (srcdoc) iframe and is reachable via contentDocument without a cross-origin error.</p>">
+      </iframe>
+    </section>
+
+    <section class="case" data-case="cross-origin-iframe">
+      <h2>Case 7 — cross-origin iframe placeholder</h2>
+      <p class="expect">Expect: this iframe has an opaque (<code>data:</code>) origin distinct
+        from the host page, simulating a real cross-origin embed (e.g. an ad or card) without
+        requiring network access. Reading <code>contentDocument</code> throws a
+        <code>DOMException</code>; the extractor must catch it and skip the frame rather than
+        crash the whole extraction pass.</p>
+      <iframe
+        class="case-iframe"
+        title="Cross-origin iframe placeholder"
+        src="data:text/html;charset=utf-8,%3Cp%20style%3D%22font-family%3Asans-serif%3Bmargin%3A8px%3B%22%3EThis%20content%20lives%20behind%20a%20cross-origin%20boundary%20and%20must%20not%20be%20read%20by%20the%20extractor.%3C%2Fp%3E">
+      </iframe>
+    </section>
+
+    <p>
+      End of fixture. A correct extractor run over this page should produce exactly six spoken
+      paragraphs of real content — the intro paragraph above plus the one visible paragraph in
+      each of cases 1, 2, 3, 5 (case 4 contributes two, in DOM order; cases 6 and 7 are
+      best-effort/optional) — and zero sentences derived from any hidden, aria-hidden, clipped,
+      or cross-origin text.
+    </p>
+
+  </article>
+
+</body>
+</html>

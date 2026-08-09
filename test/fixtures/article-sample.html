@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>The Quiet Discipline of Maintenance — Fixture Gazette</title>
+<meta name="description" content="A realistic article fixture for exercising the Cadence article extractor (T2)." />
+<style>
+  /* Minimal layout styling only — intentionally not related to extraction logic. */
+  body { font-family: Georgia, serif; max-width: 1100px; margin: 0 auto; color: #222; }
+  header.site-header, nav.site-nav, aside.sidebar, footer.site-footer, .ad-slot { background: #eee; }
+  nav.site-nav ul { display: flex; gap: 16px; list-style: none; padding: 8px 16px; }
+  .layout { display: flex; gap: 24px; }
+  .sidebar { width: 260px; flex-shrink: 0; padding: 16px; }
+  article.main-content { flex: 1; padding: 16px 24px; }
+  .ad-slot { padding: 24px; text-align: center; margin: 16px 0; font-size: 12px; color: #888; }
+  figure { margin: 24px 0; }
+  figure img { max-width: 100%; }
+  figcaption { font-size: 13px; color: #555; }
+  table { border-collapse: collapse; width: 100%; }
+  table th, table td { border: 1px solid #ccc; padding: 6px 10px; }
+  blockquote { border-left: 3px solid #999; margin: 16px 0; padding: 4px 16px; color: #444; }
+  pre code { display: block; background: #1e1e1e; color: #d4d4d4; padding: 12px; overflow-x: auto; }
+</style>
+</head>
+<body>
+
+  <!-- ================= NOISE: site chrome that a correct extractor should strip ================= -->
+  <header class="site-header">
+    <div class="logo">Fixture Gazette</div>
+    <nav class="site-nav" aria-label="Primary">
+      <ul>
+        <li><a href="/">Home</a></li>
+        <li><a href="/world">World</a></li>
+        <li><a href="/tech">Tech</a></li>
+        <li><a href="/subscribe">Subscribe</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <div class="ad-slot" data-ad-unit="leaderboard-top">
+    [ Advertisement: 970x90 leaderboard placeholder ]
+  </div>
+
+  <div class="layout">
+    <aside class="sidebar" aria-label="Related and promoted">
+      <h3>Trending now</h3>
+      <ul>
+        <li><a href="/story/1">A city that stopped repairing its bridges</a></li>
+        <li><a href="/story/2">Why maintenance jobs are hard to fill</a></li>
+        <li><a href="/story/3">The economics of not fixing things</a></li>
+      </ul>
+      <div class="ad-slot" data-ad-unit="sidebar-rect">[ Advertisement: 300x250 ]</div>
+      <h3>Newsletter</h3>
+      <p>Sign up for the Fixture Gazette morning briefing.</p>
+    </aside>
+
+    <!-- ================= SIGNAL: the actual article content ================= -->
+    <article class="main-content">
+      <h1>The Quiet Discipline of Maintenance</h1>
+      <p class="byline">By A. Fixture &middot; Published March 3, 2024 &middot; 6 min read</p>
+
+      <p>
+        Every civilization eventually learns the same lesson twice: building something is glamorous,
+        and keeping it working is not. Ribbon-cuttings get press releases; the crew that replaces a
+        worn gasket at 2 a.m. gets nothing but the quiet satisfaction of the lights staying on.
+      </p>
+
+      <p>
+        Dr. Elena Marsh, an infrastructure historian, has spent two decades studying this asymmetry.
+        &ldquo;We celebrate the opening of a bridge,&rdquo; she says, &ldquo;but almost no one
+        celebrates the 10,000th inspection that keeps it standing.&rdquo; Her research spans the U.S.,
+        the U.K., and much of continental Europe, and the pattern repeats everywhere she looks.
+      </p>
+
+      <h2>Why maintenance is invisible</h2>
+      <p>
+        Part of the problem is structural. Maintenance work is defined by the absence of an event —
+        nothing broke, nothing failed, nothing made the news. A well-maintained system is, by design,
+        boring. Fig. 1 below illustrates the failure curve that maintenance teams are constantly trying
+        to flatten.
+      </p>
+
+      <figure>
+        <img src="bathtub-curve.svg" alt="A bathtub-shaped curve showing failure rate against time: high failure rate early (infant mortality), low and flat failure rate through the useful life period, then rising again at the end (wear-out)." width="640" height="360" />
+        <figcaption>Fig. 1 — The classic &ldquo;bathtub curve&rdquo; of failure rate over a system's lifetime. Maintenance work concentrates in the flat middle to keep it flat.</figcaption>
+      </figure>
+
+      <p>
+        There is also a budgeting problem. Capital budgets fund new construction with fanfare;
+        operating budgets fund the unglamorous work of keeping that construction alive, and they are
+        the first line item cut when money is tight. No. 1 on most auditors' lists of deferred-cost
+        traps is exactly this line item.
+      </p>
+
+      <div class="ad-slot" data-ad-unit="in-article-1">[ Advertisement: in-article rectangle ]</div>
+
+      <h2>What good maintenance cultures share</h2>
+      <p>Across the organizations Marsh studied, three habits recurred, in roughly this order of importance:</p>
+      <ol>
+        <li>Maintenance staff have direct authority to halt operations when something looks wrong, without needing sign-off from three layers of management.</li>
+        <li>Inspection logs are treated as first-class data, reviewed on a fixed cadence rather than only after an incident.</li>
+        <li>Budgets separate &ldquo;keep it running&rdquo; money from &ldquo;build something new&rdquo; money, so the former can't quietly be raided for the latter.</li>
+      </ol>
+
+      <blockquote>
+        <p>&ldquo;The organizations that do this well don't think of maintenance as a cost center. They
+        think of it as the thing that makes every other budget line mean anything at all.&rdquo; &mdash; Dr. Elena Marsh</p>
+      </blockquote>
+
+      <h2>A small, telling example</h2>
+      <p>
+        Marsh's favorite illustration is not a bridge or a power plant but a municipal water utility
+        that tracks something as small as valve-turning frequency. Valves that are never exercised tend
+        to seize; seized valves turn a routine shutoff into an emergency excavation. The fix costs
+        approx. $40 per valve per year. The failure it prevents costs, on average, $18,000.
+      </p>
+
+      <table>
+        <caption>Table 1 &mdash; Cost of routine valve exercise vs. emergency replacement (illustrative)</caption>
+        <thead>
+          <tr>
+            <th scope="col">Scenario</th>
+            <th scope="col">Frequency</th>
+            <th scope="col">Cost per event</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Routine valve exercise</td>
+            <td>Annual</td>
+            <td>$40</td>
+          </tr>
+          <tr>
+            <td>Emergency excavation &amp; replacement</td>
+            <td>Rare, but rising</td>
+            <td>$18,000</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>The code that maintains itself</h2>
+      <p>
+        The same asymmetry shows up in software. A small script that checks link health nightly is
+        easy to write and easy to ignore; the following minimal example is the kind of thing that,
+        left running for years, quietly prevents an entire class of &ldquo;404 Friday&rdquo; incidents.
+      </p>
+
+      <pre><code>async function checkLinks(urls) {
+  const results = await Promise.all(
+    urls.map(async (url) => {
+      try {
+        const res = await fetch(url, { method: 'HEAD' });
+        return { url, ok: res.ok, status: res.status };
+      } catch (err) {
+        return { url, ok: false, status: null };
+      }
+    })
+  );
+  return results.filter((r) => !r.ok);
+}</code></pre>
+
+      <h2>Conclusion</h2>
+      <p>
+        None of this requires new technology. Fig. 2 (not shown) would simply repeat Fig. 1 with the
+        labels swapped, which is itself the point: the shape of the problem does not change, only our
+        willingness to fund the unglamorous middle of the curve. Vs. a ribbon-cutting, a maintenance
+        budget line will never make the evening news. It will, however, decide whether there is a
+        bridge left to cut a ribbon on in thirty years.
+      </p>
+    </article>
+  </div>
+
+  <div class="ad-slot" data-ad-unit="leaderboard-bottom">
+    [ Advertisement: 970x90 leaderboard placeholder ]
+  </div>
+
+  <footer class="site-footer">
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="/about">About</a></li>
+        <li><a href="/privacy">Privacy</a></li>
+        <li><a href="/contact">Contact</a></li>
+      </ul>
+    </nav>
+    <p class="copyright">&copy; 2024 Fixture Gazette. Not a real publication — test fixture only.</p>
+  </footer>
+
+</body>
+</html>

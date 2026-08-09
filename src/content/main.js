@@ -29,12 +29,26 @@
 
 import { MSG, TARGET, makeEnvelope, isForTarget, safeSendRuntimeMessage } from '../shared/messages.js';
 import { createLogger } from '../shared/logger.js';
+import { getSettings } from '../shared/storage.js';
+import { SETTINGS_KEY } from '../shared/keys.js';
 import { getResolvedExtractor } from './extract/registry.js';
 
 const log = createLogger('content:main');
 
 /** @type {string|null} */
 let sessionId = null;
+
+/**
+ * Read-only snapshot of `ra.settings`, refreshed on every ACTIVATE. The
+ * background service worker owns all WRITES (shared_contracts §7); reading
+ * here is what lets extractors honor autoScroll/skipPromoted/announceRetweets
+ * and lets the highlighter honor highlightStyle.
+ * @type {object}
+ */
+let currentSettings = {};
+
+/** sentenceId of the highlight currently applied, so we can clear it. */
+let activeHighlightId = null;
 
 /** @type {import('../shared/types.js').Extractor|null} */
 let activeExtractor = null;
@@ -114,14 +128,32 @@ function assignIndicesAndStrip(units) {
 
 async function handleActivate() {
   try {
+    // Every ACTIVATE starts a brand-new background Session whose flat
+    // sentence array is empty, so session-local indices MUST restart at 0.
+    teardown();
+
     activeExtractor = await getResolvedExtractor(location);
     if (!activeExtractor) {
       log.error('no extractor resolved for host', location.host);
       return;
     }
 
-    const settings = {}; // background owns settings; extractor.init gets what it needs later
-    await activeExtractor.init({ log: createLogger(`content:${activeExtractor.id}`), settings });
+    try {
+      currentSettings = await getSettings();
+    } catch (err) {
+      log.warn('could not read settings; using extractor defaults', err);
+      currentSettings = {};
+    }
+
+    // Show the player immediately; extraction can take a moment.
+    const widget = await getWidget();
+    widget?.mount?.();
+    widget?.setPosition?.(currentSettings.widgetPosition ?? null);
+
+    await activeExtractor.init({
+      log: createLogger(`content:${activeExtractor.id}`),
+      settings: currentSettings,
+    });
 
     const result = await activeExtractor.extract();
     const units = assignIndicesAndStrip(result.units);
@@ -174,6 +206,7 @@ async function handleHighlightSentence(payload) {
   const widget = await getWidget();
 
   if (!sentence || !activeExtractor) {
+    await clearActiveHighlight();
     widget?.showTextFallback?.(payload.text);
     await safeSendRuntimeMessage(
       makeEnvelope(MSG.HIGHLIGHT_RESULT, TARGET.BACKGROUND, sessionId, {
@@ -192,7 +225,16 @@ async function handleHighlightSentence(payload) {
 
     if (anchor) {
       const highlighter = await getHighlighter();
-      await highlighter?.apply?.(anchor, { sentenceId: payload.sentenceId });
+      // Nothing else clears the previous sentence's highlight, so without
+      // this every read sentence would stay lit for the whole session.
+      if (activeHighlightId && activeHighlightId !== payload.sentenceId) {
+        highlighter?.clear?.(activeHighlightId);
+      }
+      await highlighter?.apply?.(anchor, {
+        sentenceId: payload.sentenceId,
+        style: currentSettings.highlightStyle,
+      });
+      activeHighlightId = payload.sentenceId;
       await safeSendRuntimeMessage(
         makeEnvelope(MSG.HIGHLIGHT_RESULT, TARGET.BACKGROUND, sessionId, {
           sentenceId: payload.sentenceId,
@@ -201,6 +243,7 @@ async function handleHighlightSentence(payload) {
         })
       );
     } else {
+      await clearActiveHighlight();
       widget?.showTextFallback?.(payload.text);
       await safeSendRuntimeMessage(
         makeEnvelope(MSG.HIGHLIGHT_RESULT, TARGET.BACKGROUND, sessionId, {
@@ -213,6 +256,7 @@ async function handleHighlightSentence(payload) {
     }
   } catch (err) {
     log.error('highlight failed', err);
+    await clearActiveHighlight();
     widget?.showTextFallback?.(payload.text);
     await safeSendRuntimeMessage(
       makeEnvelope(MSG.HIGHLIGHT_RESULT, TARGET.BACKGROUND, sessionId, {
@@ -225,9 +269,20 @@ async function handleHighlightSentence(payload) {
   }
 }
 
+/** Clear whatever highlight is currently applied, if any. */
+async function clearActiveHighlight() {
+  if (!activeHighlightId) return;
+  const highlighter = await getHighlighter();
+  highlighter?.clear?.(activeHighlightId);
+  activeHighlightId = null;
+}
+
 async function handleClearHighlight(payload) {
   const highlighter = await getHighlighter();
   highlighter?.clear?.(payload?.sentenceId);
+  if (payload?.sentenceId == null || payload.sentenceId === activeHighlightId) {
+    activeHighlightId = null;
+  }
 }
 
 async function forwardToWidget(type, payload) {
@@ -241,7 +296,19 @@ async function forwardToWidget(type, payload) {
  */
 function onRuntimeMessage(env, _sender, _sendResponse) {
   if (!isForTarget(env, TARGET.CONTENT)) return undefined;
-  if (env.sessionId != null && sessionId != null && env.sessionId !== sessionId) return undefined;
+
+  // ACTIVATE is what *establishes* the current session (each toolbar click
+  // mints a fresh sessionId), so it must never be dropped by the stale-session
+  // filter below — otherwise the second and every subsequent activation of a
+  // tab would be silently ignored.
+  if (
+    env.type !== MSG.ACTIVATE &&
+    env.sessionId != null &&
+    sessionId != null &&
+    env.sessionId !== sessionId
+  ) {
+    return undefined;
+  }
 
   switch (env.type) {
     case MSG.ACTIVATE:
@@ -261,9 +328,12 @@ function onRuntimeMessage(env, _sender, _sendResponse) {
     case MSG.CLEAR_HIGHLIGHT:
       handleClearHighlight(env.payload);
       break;
+    case MSG.SESSION_ENDED:
+      clearActiveHighlight();
+      forwardToWidget(env.type, env.payload);
+      break;
     case MSG.PLAYBACK_STATE:
     case MSG.RESUME_AVAILABLE:
-    case MSG.SESSION_ENDED:
     case MSG.TOAST:
       forwardToWidget(env.type, env.payload);
       break;
@@ -308,6 +378,10 @@ function teardown() {
   activeExtractor = null;
   sentenceMap.clear();
   nextSentenceIndex = 0;
+  activeHighlightId = null;
+  // Synchronous best-effort: only possible if the module was already loaded
+  // (pagehide gives us no time to await a dynamic import).
+  highlighterModule?.clearAll?.();
 }
 
 function watchForSpaNavigation() {
@@ -332,8 +406,28 @@ function watchForSpaNavigation() {
   };
 }
 
+/**
+ * Keep `currentSettings` fresh mid-session. Mutated IN PLACE because
+ * extractors hold a reference to the very object handed to init(ctx) and
+ * re-read it on each call (see article.js `this._settings`), so an in-place
+ * update is what makes a live autoScroll toggle actually take effect.
+ */
+function watchSettings() {
+  try {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'local') return;
+      const change = changes[SETTINGS_KEY];
+      if (!change || !change.newValue) return;
+      Object.assign(currentSettings, change.newValue);
+    });
+  } catch (err) {
+    log.debug('could not subscribe to settings changes', err);
+  }
+}
+
 function boot() {
   chrome.runtime.onMessage.addListener(onRuntimeMessage);
+  watchSettings();
   window.addEventListener('pagehide', teardown);
   watchForSpaNavigation();
   announceContentReady();
