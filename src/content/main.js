@@ -382,6 +382,13 @@ function teardown() {
   // Synchronous best-effort: only possible if the module was already loaded
   // (pagehide gives us no time to await a dynamic import).
   highlighterModule?.clearAll?.();
+  // The widget must disappear on teardown (SPA navigation / pagehide), not
+  // just on SESSION_ENDED — see src/content/ui/widget.js module doc. This is
+  // a no-op if the widget was never mounted (widgetModule.unmount() only
+  // acts on an existing singleton, never creates one). handleActivate()
+  // always calls teardown() before mounting a fresh widget, so this never
+  // races the next mount — mount()/unmount() are independent, idempotent.
+  widgetModule?.unmount?.();
 }
 
 function watchForSpaNavigation() {

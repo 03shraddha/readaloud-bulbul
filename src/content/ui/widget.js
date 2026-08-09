@@ -1,10 +1,9 @@
 /**
  * src/content/ui/widget.js
  *
- * The floating player widget. `createWidget({onControl, onResumeDecision})`
- * returns a small API:
- *   { mount, unmount, render(playbackState), showTextFallback(text),
- *     showResumePrompt(payload), toast(level, msg), setPosition(p) }
+ * The floating player widget. `createWidget({onControl})` returns a small
+ * API: { mount, unmount, render(playbackState), showTextFallback(text),
+ * toast(level, msg), setPosition(p) }.
  *
  * The widget is a PURE render of PlaybackState (shared_contracts §4) — it
  * never keeps its own playback state. It attaches a Shadow DOM root
@@ -18,18 +17,35 @@
  * Every control calls `onControl(controlType, payload)` with the exact
  * CONTROL_* shape from shared_contracts §3 — the caller (content/main.js) is
  * responsible for wrapping that into a message envelope and sending it to
- * the background. `onResumeDecision({accept, index})` is called from the
- * resume-prompt buttons.
+ * the background.
+ *
+ * mount()/unmount() are the widget's whole visibility lifecycle: it "appears
+ * on toolbar-icon activation and disappears on stop" (PRD). unmount() is
+ * always synchronous/immediate — see the SESSION_ENDED handling below for
+ * why a deferred unmount would be actively wrong.
+ *
+ * The resume offer ("Resume reading?") is a SEPARATE, much smaller component
+ * — `createResumeBanner({onDecision})` — with its own Shadow DOM root. It is
+ * NOT part of this widget's mount path: RESUME_AVAILABLE can arrive at
+ * page-load time (persistence.handleContentReady(), before the user has
+ * clicked anything), and offering to resume must never itself summon the
+ * full player. Only an explicit user action — clicking "Resume" on the
+ * banner, or a fresh toolbar-icon ACTIVATE — mounts the full widget.
  */
 
 import { MSG, TARGET, makeEnvelope, safeSendRuntimeMessage } from '../../shared/messages.js';
 import { SHADOW_ROOT_ID, WIDGET_Z_INDEX, RATES } from '../../shared/constants.js';
-import { getWidgetStyles } from './widget-styles.js';
+import { getWidgetStyles, getResumeBannerStyles } from './widget-styles.js';
 import { ICONS } from './icons.js';
 
 const DEFAULT_MARGIN_PX = 20;
 const TOAST_TTL_MS = 4200;
 const MAX_TOASTS = 3;
+
+/** Shadow-DOM host id for the resume banner — deliberately distinct from
+ * SHADOW_ROOT_ID (the full widget's), since the two are separate mount
+ * paths that are never meant to be conflated. */
+const RESUME_BANNER_ROOT_ID = 'cadence-resume-root';
 
 function formatRate(rate) {
   const n = Number(rate);
@@ -72,14 +88,6 @@ function defaultPlaybackState() {
 function buildMarkup() {
   return `
 <div class="cadence-toasts" data-role="toasts"></div>
-<div class="cadence-resume" data-role="resume" hidden>
-  <div class="cadence-resume-title">Resume where you left off?</div>
-  <div class="cadence-resume-preview" data-role="resume-preview"></div>
-  <div class="cadence-resume-actions">
-    <button type="button" class="cadence-btn cadence-btn--secondary" data-action="resume-dismiss">Start over</button>
-    <button type="button" class="cadence-btn cadence-btn--primary" data-action="resume-accept">Resume</button>
-  </div>
-</div>
 <div class="cadence-header" data-role="header">
   <span class="cadence-grip">${ICONS.grip}</span>
   <span class="cadence-title" data-role="title">Cadence</span>
@@ -126,9 +134,9 @@ function buildMarkup() {
 }
 
 /**
- * @param {{onControl?: (type:string, payload:object)=>void, onResumeDecision?: (decision:{accept:boolean,index:number})=>void}} [callbacks]
+ * @param {{onControl?: (type:string, payload:object)=>void}} [callbacks]
  */
-export function createWidget({ onControl, onResumeDecision } = {}) {
+export function createWidget({ onControl } = {}) {
   let hostEl = null;
   let shadow = null;
   let refs = {};
@@ -136,7 +144,6 @@ export function createWidget({ onControl, onResumeDecision } = {}) {
   let lastState = defaultPlaybackState();
   let fallbackText = null; // last text passed to showTextFallback(); see updatePreview()
   let lastErrorCode = null;
-  let resumePayload = null;
 
   let position = null; // {x,y} in px, or null = default bottom-right
   let dragging = false;
@@ -258,20 +265,6 @@ export function createWidget({ onControl, onResumeDecision } = {}) {
   }
 
   /**
-   * @param {import('../../shared/types.js').ResumeAvailablePayload} payload
-   */
-  function showResumePrompt(payload) {
-    resumePayload = payload || null;
-    if (!hostEl) return;
-    if (!resumePayload) {
-      refs.resume.hidden = true;
-      return;
-    }
-    refs.resumePreview.textContent = resumePayload.previewText || '';
-    refs.resume.hidden = false;
-  }
-
-  /**
    * @param {'info'|'warn'|'error'} level
    * @param {string} message
    */
@@ -350,17 +343,6 @@ export function createWidget({ onControl, onResumeDecision } = {}) {
       });
     });
 
-    refs.resumeAccept.addEventListener('click', () => {
-      const idx = resumePayload?.index ?? 0;
-      refs.resume.hidden = true;
-      onResumeDecision?.({ accept: true, index: idx });
-    });
-    refs.resumeDismiss.addEventListener('click', () => {
-      const idx = resumePayload?.index ?? 0;
-      refs.resume.hidden = true;
-      onResumeDecision?.({ accept: false, index: idx });
-    });
-
     refs.header.addEventListener('pointerdown', (e) => {
       if (e.target.closest && e.target.closest('button')) return;
       dragging = true;
@@ -403,10 +385,6 @@ export function createWidget({ onControl, onResumeDecision } = {}) {
     return {
       container,
       toasts: byRole('toasts'),
-      resume: byRole('resume'),
-      resumePreview: byRole('resume-preview'),
-      resumeAccept: container.querySelector('[data-action="resume-accept"]'),
-      resumeDismiss: container.querySelector('[data-action="resume-dismiss"]'),
       header: byRole('header'),
       body: byRole('body'),
       unitLabel: byRole('unit-label'),
@@ -450,7 +428,6 @@ export function createWidget({ onControl, onResumeDecision } = {}) {
 
     applyPosition(position, { persist: false });
     render(lastState);
-    showResumePrompt(resumePayload);
     if (fallbackText != null) showTextFallback(fallbackText);
   }
 
@@ -472,10 +449,106 @@ export function createWidget({ onControl, onResumeDecision } = {}) {
     unmount,
     render,
     showTextFallback,
-    showResumePrompt,
     toast,
     setPosition,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Resume banner — a separate, minimal, dismissible component with its own
+// Shadow DOM root. Deliberately NOT `createWidget()`: mounting/showing this
+// must never mount the full player (see module doc comment above).
+// ---------------------------------------------------------------------------
+
+function buildResumeBannerMarkup() {
+  return `
+<button type="button" class="cadence-resume-banner-close" data-action="close" aria-label="Dismiss">${ICONS.close}</button>
+<div class="cadence-resume-banner-title">Resume reading?</div>
+<div class="cadence-resume-banner-preview" data-role="preview"></div>
+<div class="cadence-resume-banner-actions">
+  <button type="button" class="cadence-btn cadence-btn--secondary" data-action="start-over">Start over</button>
+  <button type="button" class="cadence-btn cadence-btn--primary" data-action="resume">Resume</button>
+</div>
+`;
+}
+
+/**
+ * @param {{onDecision?: (decision:{accept:boolean,index:number})=>void}} [callbacks]
+ */
+function createResumeBanner({ onDecision } = {}) {
+  let hostEl = null;
+  let shadow = null;
+  let refs = {};
+  let payload = null;
+
+  function unmount() {
+    if (!hostEl) return;
+    hostEl.remove();
+    hostEl = null;
+    shadow = null;
+    refs = {};
+  }
+
+  function mount() {
+    if (hostEl) return;
+
+    hostEl = document.createElement('div');
+    hostEl.id = RESUME_BANNER_ROOT_ID;
+    hostEl.style.position = 'fixed';
+    hostEl.style.zIndex = String(WIDGET_Z_INDEX);
+
+    shadow = hostEl.attachShadow({ mode: 'closed' });
+
+    const styleEl = document.createElement('style');
+    styleEl.textContent = getResumeBannerStyles();
+    shadow.appendChild(styleEl);
+
+    const container = document.createElement('div');
+    container.className = 'cadence-resume-banner';
+    container.innerHTML = buildResumeBannerMarkup();
+    shadow.appendChild(container);
+
+    refs = {
+      container,
+      preview: container.querySelector('[data-role="preview"]'),
+      resumeBtn: container.querySelector('[data-action="resume"]'),
+      startOverBtn: container.querySelector('[data-action="start-over"]'),
+      closeBtn: container.querySelector('[data-action="close"]'),
+    };
+
+    refs.resumeBtn.addEventListener('click', () => {
+      const idx = payload?.index ?? 0;
+      unmount();
+      onDecision?.({ accept: true, index: idx });
+    });
+    refs.startOverBtn.addEventListener('click', () => {
+      const idx = payload?.index ?? 0;
+      unmount();
+      onDecision?.({ accept: false, index: idx });
+    });
+    // A plain dismiss (the "x") is not a decision — it doesn't tell the
+    // background anything, it just hides the offer for now. Unlike
+    // "Start over" it does not decline the pending resume.
+    refs.closeBtn.addEventListener('click', () => unmount());
+
+    (document.documentElement || document.body).appendChild(hostEl);
+    if (payload) refs.preview.textContent = payload.previewText || '';
+  }
+
+  /**
+   * @param {import('../../shared/types.js').ResumeAvailablePayload|null} nextPayload
+   */
+  function show(nextPayload) {
+    payload = nextPayload || null;
+    if (!payload) {
+      unmount();
+      return;
+    }
+    mount();
+    refs.preview.textContent = payload.previewText || '';
+  }
+
+  return { show, unmount };
 }
 
 // ---------------------------------------------------------------------------
@@ -487,11 +560,27 @@ export function createWidget({ onControl, onResumeDecision } = {}) {
 // if it were an already-constructed widget, rather than calling
 // `createWidget(...)` itself. To keep that call site working without
 // modifying main.js (out of scope for this task / owned by foundation), the
-// default export is a lazily-mounted singleton wired to send CONTROL_* /
-// RESUME_DECISION messages straight to the background, plus a small
-// `onMessage(type, payload)` dispatcher for the background -> content
-// messages main.js forwards verbatim (SESSION_STARTED, PLAYBACK_STATE,
-// RESUME_AVAILABLE, SESSION_ENDED, TOAST).
+// default export is a lazily-mounted singleton wired to send CONTROL_*
+// messages straight to the background, plus a small `onMessage(type,
+// payload)` dispatcher for the background -> content messages main.js
+// forwards verbatim (SESSION_STARTED, PLAYBACK_STATE, RESUME_AVAILABLE,
+// SESSION_ENDED, TOAST).
+//
+// Two lifecycles are deliberately kept independent here:
+//  - The full widget singleton only ever mounts via an explicit `mount()`
+//    call (from main.js's ACTIVATE handler) or the resume banner's "Resume"
+//    button — never as a side effect of merely receiving a message.
+//  - `dispatchMessage` never calls `ensureSingleton()` for RESUME_AVAILABLE,
+//    so a page load with saved progress cannot summon the full player.
+//  - On SESSION_ENDED the singleton (if one exists) is unmounted
+//    IMMEDIATELY, synchronously, in this same call — never deferred. That
+//    matters because `prepareNewSession()` (background/session.js) ends the
+//    outgoing session — sending SESSION_ENDED — *before* sending the next
+//    ACTIVATE when the same tab is re-activated. ACTIVATE always does a
+//    fresh, independent mount regardless of the widget's current state, so
+//    there is no ordering dependency between the two — but a delayed
+//    unmount here would race past that fresh mount and tear down the
+//    just-remounted widget instead of the one that actually ended.
 //
 // `createWidget` remains the primary, spec-compliant export for any caller
 // that wants to construct and own its own instance.
@@ -500,6 +589,7 @@ export function createWidget({ onControl, onResumeDecision } = {}) {
 let trackedSessionId = null;
 let trackedResumeContentKey = null;
 let singleton = null;
+let resumeBanner = null;
 
 function sendControl(type, payload) {
   safeSendRuntimeMessage(makeEnvelope(type, TARGET.BACKGROUND, trackedSessionId, payload));
@@ -513,35 +603,62 @@ function sendResumeDecision({ accept, index }) {
       index,
     })
   );
+  // A fresh Resume/Start-over decision means whatever banner offer this was
+  // answering no longer applies to this page load.
+  resumeBanner?.show(null);
 }
 
+/** Creates (mounting) the full player singleton if it doesn't exist yet. */
 function ensureSingleton() {
   if (!singleton) {
-    singleton = createWidget({ onControl: sendControl, onResumeDecision: sendResumeDecision });
+    singleton = createWidget({ onControl: sendControl });
     singleton.mount();
   }
   return singleton;
 }
 
+/** Read-only access: never creates/mounts. Used where "if it exists" matters. */
+function peekSingleton() {
+  return singleton;
+}
+
+function ensureResumeBanner() {
+  if (!resumeBanner) {
+    resumeBanner = createResumeBanner({ onDecision: sendResumeDecision });
+  }
+  return resumeBanner;
+}
+
 function dispatchMessage(type, payload) {
-  const widget = ensureSingleton();
   switch (type) {
     case MSG.SESSION_STARTED:
       trackedSessionId = payload?.sessionId ?? trackedSessionId;
       break;
     case MSG.PLAYBACK_STATE:
       trackedSessionId = payload?.sessionId ?? trackedSessionId;
-      widget.render(payload);
+      ensureSingleton().render(payload);
       break;
     case MSG.RESUME_AVAILABLE:
+      // Deliberately NOT ensureSingleton(): showing a resume offer must
+      // never mount the full player widget (see module + section doc above).
       trackedResumeContentKey = payload?.contentKey ?? trackedResumeContentKey;
-      widget.showResumePrompt(payload);
+      ensureResumeBanner().show(payload);
       break;
-    case MSG.SESSION_ENDED:
-      widget.toast(payload?.reason === 'error' ? 'error' : 'info', payload?.message || `Session ended: ${payload?.reason ?? 'unknown'}`);
+    case MSG.SESSION_ENDED: {
+      // Immediate, synchronous unmount — see the block comment above for why
+      // this must not be deferred.
+      const widget = peekSingleton();
+      if (widget) {
+        widget.toast(
+          payload?.reason === 'error' ? 'error' : 'info',
+          payload?.message || `Session ended: ${payload?.reason ?? 'unknown'}`
+        );
+        widget.unmount();
+      }
       break;
+    }
     case MSG.TOAST:
-      widget.toast(payload?.level ?? 'info', payload?.message ?? '');
+      ensureSingleton().toast(payload?.level ?? 'info', payload?.message ?? '');
       break;
     default:
       break;
@@ -550,10 +667,11 @@ function dispatchMessage(type, payload) {
 
 const defaultExport = {
   mount: (...args) => ensureSingleton().mount(...args),
-  unmount: (...args) => ensureSingleton().unmount(...args),
+  // Never creates a widget just to immediately tear it down — if there's no
+  // singleton, there's nothing mounted, so unmounting is already satisfied.
+  unmount: (...args) => peekSingleton()?.unmount(...args),
   render: (...args) => ensureSingleton().render(...args),
   showTextFallback: (...args) => ensureSingleton().showTextFallback(...args),
-  showResumePrompt: (...args) => ensureSingleton().showResumePrompt(...args),
   toast: (...args) => ensureSingleton().toast(...args),
   setPosition: (...args) => ensureSingleton().setPosition(...args),
   /** Compatibility shim consumed by content/main.js's forwardToWidget(). */
