@@ -193,7 +193,12 @@ function buildTitleUnit(readView, statusId, languageCode) {
         text,
         languageCode,
         anchorKind: 'element',
-        locator: { kind: 'element', element: titleEl, articleView: true },
+        // The title sits right at the top of the page (directly after the
+        // cover image), so centering it like a body sentence would
+        // actively scroll DOWN to push it to mid-viewport -- a jarring,
+        // unnecessary move right as reading starts. Anchor it to the top
+        // of the viewport instead.
+        locator: { kind: 'element', element: titleEl, articleView: true, scrollBlock: 'start' },
       },
     ],
     meta: {},
@@ -254,6 +259,8 @@ export function ensureArticleVisible(locator) {
   // No-ops when already comfortably on screen -- an Article body reads
   // through many short sentences per paragraph block; re-centering on every
   // one would visibly race ahead of the actual reading pace. See scroll.js.
-  scrollIntoViewSmart(target, { behavior: 'smooth', block: 'center' });
+  // `scrollBlock` lets a specific locator (the title) override the default
+  // centering -- see buildTitleUnit()'s comment for why.
+  scrollIntoViewSmart(target, { behavior: 'smooth', block: locator.scrollBlock || 'center' });
   return true;
 }
