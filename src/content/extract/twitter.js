@@ -196,25 +196,36 @@ async function resolveAnchor(sentence) {
   const article = findArticleByStatusId(locator.statusId);
   if (!article) return null; // genuinely unmounted right now -> widget preview fallback
 
+  // None of the cases below fall back to highlighting the whole `article`
+  // when the specific piece isn't found. On a short tweet "the whole
+  // article" is small enough that it barely mattered; on X's long-form
+  // Article posts the entire multi-paragraph post lives inside one
+  // `article`, so that fallback highlighted the whole visible post for a
+  // single social-context/promoted/poll/link-card/image sentence. Returning
+  // null instead defers to the widget's text-preview fallback, same as the
+  // 'text'/'quote' cases below.
   switch (locator.part) {
     case 'social-context': {
       const el = querySelector(article, SELECTORS.socialContext);
-      return { kind: 'element', element: el || article };
+      return el ? { kind: 'element', element: el } : null;
     }
     case 'promoted': {
       const el = querySelector(article, SELECTORS.promoted);
-      return { kind: 'element', element: el || article };
+      return el ? { kind: 'element', element: el } : null;
     }
     case 'poll': {
       const el = querySelector(article, SELECTORS.poll);
-      return { kind: 'element', element: el || article };
+      return el ? { kind: 'element', element: el } : null;
     }
     case 'link-card': {
       const el = querySelector(article, SELECTORS.cardWrapper);
-      return { kind: 'element', element: el || article };
+      return el ? { kind: 'element', element: el } : null;
     }
     case 'image': {
-      return { kind: 'element', element: article };
+      // No per-image ordinal is tracked in the locator yet, so there is no
+      // reliable way to point at THIS specific image among possibly
+      // several -- degrade to the text-preview fallback rather than guess.
+      return null;
     }
     case 'quote': {
       const nodes = queryAll(article, SELECTORS.tweetText);
