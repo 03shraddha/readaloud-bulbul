@@ -111,7 +111,18 @@ function buildMarkup() {
     <div class="boyle-progress-ring-wrap">
       <svg class="boyle-progress-ring" viewBox="0 0 48 48" width="48" height="48" aria-hidden="true" focusable="false">
         <defs>
-          <linearGradient id="boyle-ring-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <!-- gradientTransform cancels the -90deg CSS rotation that
+               .boyle-progress-ring applies to this whole <svg> (see
+               widget-styles.js). That rotation turns the ring's start point
+               into 12 o'clock, but it rotates the painted gradient with it,
+               which would leave GRADIENT_FROM at the bottom-left and
+               GRADIENT_TO at the top-right — the mirror image of the
+               linear-gradient(135deg, from, to) used by the play button
+               and the toggle switches. Rotating the gradient +90deg about
+               the bounding-box centre nets out to zero, so on screen the
+               ring reads blue (top-left) -> orange (bottom-right) like every
+               other gradient in the widget. -->
+          <linearGradient id="boyle-ring-gradient" x1="0%" y1="0%" x2="100%" y2="100%" gradientTransform="rotate(90 0.5 0.5)">
             <stop offset="0%" stop-color="${GRADIENT_FROM}" />
             <stop offset="100%" stop-color="${GRADIENT_TO}" />
           </linearGradient>
