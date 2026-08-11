@@ -221,19 +221,21 @@ async function resolveAnchor(sentence) {
       const quoteTextEl = nodes[1] || null;
       if (quoteTextEl) {
         const range = findRangeForFingerprint(quoteTextEl, locator.textFingerprint);
-        if (range) return { kind: 'range', range };
-        return { kind: 'element', element: quoteTextEl };
+        // No precise range -> fall through to the widget's text-preview
+        // fallback rather than highlighting the whole quote block: on a
+        // short tweet that's a mild over-highlight, but on X's long-form
+        // Article posts (the whole article lives in one tweetText element)
+        // it would light up the entire visible article for every sentence.
+        return range ? { kind: 'range', range } : null;
       }
-      const container = querySelector(article, SELECTORS.quoteContainer);
-      return { kind: 'element', element: container || article };
+      return null;
     }
     case 'text':
     default: {
       const textEl = querySelector(article, SELECTORS.tweetText);
-      if (!textEl) return { kind: 'element', element: article };
+      if (!textEl) return null;
       const range = findRangeForFingerprint(textEl, locator.textFingerprint);
-      if (range) return { kind: 'range', range };
-      return { kind: 'element', element: textEl };
+      return range ? { kind: 'range', range } : null;
     }
   }
 }
