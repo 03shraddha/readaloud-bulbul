@@ -14,6 +14,68 @@ backend proxy, and plays them back in order with live sentence highlighting.
 
 ---
 
+## Quick start
+
+There is no hosted backend for this project. Each person runs the backend
+on their own machine, with their own Sarvam API key. Two pieces run:
+the backend proxy (holds your key, talks to Sarvam) and the extension
+itself (loaded unpacked in Chrome).
+
+**1. Get a Sarvam API key.** Sign up at [sarvam.ai](https://www.sarvam.ai)
+and generate an API key from your account.
+
+**2. Clone this repo and add your key.**
+```bash
+git clone https://github.com/03shraddha/readaloud-bulbul.git
+cd readaloud-bulbul
+cp backend/.env.example backend/.env
+# open backend/.env and set:
+# SARVAM_API_KEY=your_key_here
+```
+
+**3. Install and start the backend.**
+```bash
+cd backend && npm install && cd ..
+npm run backend
+```
+Check it started correctly:
+```bash
+curl -s http://localhost:8787/v1/health
+```
+You should see `"mock": false` and `"has_api_key": true`. If you don't have
+a key yet, run `npm run backend:mock` instead. It fakes the audio (a plain
+tone) so you can try the extension without one.
+
+**4. Load the extension in Chrome.**
+- Go to `chrome://extensions`
+- Turn on **Developer mode** (top-right)
+- Click **Load unpacked**, and pick this repo's root folder (the one with
+  `manifest.json`)
+- Pin the toolbar icon
+
+**5. Use it.**
+- Open an article, or go to `x.com` and log in
+- Click the toolbar icon to start reading
+- Use the floating widget for play/pause, speed, and skip
+
+Your API key stays on your machine, in `backend/.env`. It is never sent to
+Chrome, never bundled into the extension, and `.gitignore` keeps it out of
+git.
+
+### Current limits
+
+- **No Chrome Web Store listing yet.** Installing it means loading it
+  unpacked, as above.
+- **No shared backend.** Everyone runs their own `backend/`, with their own
+  key.
+- **No rate limiting on the backend.** Don't point more than one person at
+  the same running backend/key without adding that first.
+
+For the full manual test checklist, see [`docs/TESTING.md`](docs/TESTING.md).
+For the message/storage/API contracts, see [`docs/CONTRACTS.md`](docs/CONTRACTS.md).
+
+---
+
 ## Architecture
 
 Four cooperating runtimes, all plain ES modules, **no build step, no
@@ -147,27 +209,27 @@ src/shared/                  foundation, read-only contracts for every task
 
 src/content/                 per-tab content script
   loader.js                    classic script, manifest-injected
-  main.js                       in-page orchestrator (foundation-owned)
+  main.js                       in-page orchestrator
   extract/
-    registry.js                  host -> extractor routing (foundation-owned)
-    article.js                    generic-page extractor        [separate task]
-    twitter.js                    x.com/twitter.com extractor    [separate task]
-    lib/                          extractor-internal helpers     [separate task]
+    registry.js                  host -> extractor routing
+    article.js                    generic-page extractor
+    twitter.js                    x.com/twitter.com extractor
+    lib/                          extractor-internal helpers
   ui/
     widget.js / widget-styles.js / highlighter.js / auto-scroll.js / icons.js
-                                   floating widget + highlighting [separate task]
+                                   floating widget + highlighting
 
-src/background/              service worker ("the brain")        [separate task]
+src/background/              service worker ("the brain")
   service-worker.js / session.js / tts-client.js / prefetch-queue.js /
   persistence.js / offscreen-manager.js
 
-src/offscreen/                audio playback document            [separate task]
+src/offscreen/                audio playback document
   offscreen.html / offscreen.js / audio-queue.js
 
-src/options/                  extension options page              [separate task]
+src/options/                  extension options page
   options.html / options.js / options.css
 
-backend/                      Node 20 + Express TTS proxy          [separate task]
+backend/                      Node 20 + Express TTS proxy
   server.js / config.js / routes/ / lib/ / test/
 
 icons/                         placeholder toolbar icons (generated, no branding)
@@ -175,9 +237,6 @@ icons/                         placeholder toolbar icons (generated, no branding
 test/, docs/                   fixtures, contract-check harness, docs
 ```
 
-Foundation files (everything under `src/shared/`, plus `manifest.json`,
-`package.json`, `src/content/loader.js`, `src/content/main.js`, and
-`src/content/extract/registry.js`) are the shared contracts every other
-task builds on top of. Files marked `[separate task]` above are
-intentionally **not** created by this scaffolding pass — only their parent
-directories exist, ready for the implementation tasks that own them.
+Everything under `src/shared/` (message catalog, storage schema, constants,
+text normalization) is the contract every other module builds on. See
+[`docs/CONTRACTS.md`](docs/CONTRACTS.md) for the full spec.
