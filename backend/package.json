@@ -1,5 +1,5 @@
 {
-  "name": "cadence-backend",
+  "name": "boyle-backend",
   "private": true,
   "version": "0.1.0",
   "description": "Node 20 + Express TTS proxy wrapping Sarvam Bulbul v3, with a dependency-free MOCK_TTS mode.",

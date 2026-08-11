@@ -1,4 +1,4 @@
-# Cadence backend — TTS proxy
+# Boyle backend — TTS proxy
 
 Minimal Node 20 + Express service that wraps Sarvam Bulbul v3
 (`POST https://api.sarvam.ai/text-to-speech`) and holds the API key
@@ -52,7 +52,7 @@ silently no-ops.
 ```bash
 curl -s http://localhost:8787/v1/synthesize \
   -H 'content-type: application/json' \
-  -d '{"text": "Hello from Cadence.", "language_code": "en-IN"}' | jq .
+  -d '{"text": "Hello from Boyle.", "language_code": "en-IN"}' | jq .
 ```
 
 Success `200`:

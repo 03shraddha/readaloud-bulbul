@@ -1,4 +1,4 @@
-# Cadence — Shared Contracts (reviewer copy)
+# Boyle — Shared Contracts (reviewer copy)
 
 This is the human-readable copy of the shared contracts every task conforms to. The
 source of truth is always the **code** in `src/shared/` (`messages.js`,
@@ -237,11 +237,11 @@ warning, advance.
 ## 10. Highlight / fallback protocol
 
 On `HIGHLIGHT_SENTENCE`: `ensureVisible` → `resolveAnchor` → apply highlight (CSS
-Custom Highlight API, or a `<span class="cadence-hl">` Range fallback, or an
+Custom Highlight API, or a `<span class="boyle-hl">` Range fallback, or an
 Element class toggle) → send `HIGHLIGHT_RESULT`. A `null` anchor (including the
 **unmounted-tweet** case on X's virtualized timeline) means the widget shows the
 text preview instead — this never blocks playback. All injected UI lives in a
-Shadow DOM root (`#cadence-root`).
+Shadow DOM root (`#boyle-root`).
 
 ---
 
@@ -259,7 +259,7 @@ Single source of truth: `src/shared/constants.js`. Highlights: `MAX_SENTENCE_CHA
 
 ## Branding note
 
-Cadence is a project codename, not a Sarvam product. No Sarvam name, logo, or
+Boyle is a project codename, not a Sarvam product. No Sarvam name, logo, or
 wordmark appears anywhere in the manifest, icons, options page, or in-page widget —
 only the neutral blue→orange gradient (`GRADIENT_FROM`/`GRADIENT_TO`) identifies it
 visually.

@@ -1,6 +1,6 @@
 # Manual QA script
 
-This is the checklist for exercising Cadence end-to-end **without** a Sarvam API key
+This is the checklist for exercising Boyle end-to-end **without** a Sarvam API key
 and without depending on live x.com/twitter.com being in any particular state. Pair
 it with the automated pieces:
 

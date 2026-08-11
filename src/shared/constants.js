@@ -60,7 +60,7 @@ export const X_MAX_UNITS_PER_BATCH = 25;
 export const OFFSCREEN_URL = 'src/offscreen/offscreen.html';
 
 // --- Widget / highlight UI ---
-export const SHADOW_ROOT_ID = 'cadence-root';
+export const SHADOW_ROOT_ID = 'boyle-root';
 export const WIDGET_Z_INDEX = 2147483000;
 export const GRADIENT_FROM = '#2F6BFF';
 export const GRADIENT_TO = '#FF8A34';

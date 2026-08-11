@@ -13,8 +13,8 @@
  * breaks the host page.
  */
 
-(function bootCadenceLoader() {
-  const GUARD_KEY = '__cadenceLoaderInjected__';
+(function bootBoyleLoader() {
+  const GUARD_KEY = '__boyleLoaderInjected__';
 
   if (window[GUARD_KEY]) {
     return;
@@ -24,9 +24,9 @@
   try {
     const mainUrl = chrome.runtime.getURL('src/content/main.js');
     import(mainUrl).catch((err) => {
-      console.error('[cadence:loader] failed to import main.js', err);
+      console.error('[boyle:loader] failed to import main.js', err);
     });
   } catch (err) {
-    console.error('[cadence:loader] failed to boot', err);
+    console.error('[boyle:loader] failed to boot', err);
   }
 })();

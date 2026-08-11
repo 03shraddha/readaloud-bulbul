@@ -6,26 +6,26 @@
  * Per shared_contracts §10: prefers the CSS Custom Highlight API
  * (`CSS.highlights` + `new Highlight(range)`) so the host page's DOM is
  * never mutated for Range anchors. Falls back to wrapping the Range in
- * `<span class="cadence-hl ...">` elements (recorded so clear() can
+ * `<span class="boyle-hl ...">` elements (recorded so clear() can
  * unwrap/normalize them away) when the API is unavailable, and to a plain
  * class toggle for Element anchors.
  *
  * The one unavoidable page-level side effect is a single `<style>` tag
- * (id="cadence-hl-style") appended to <head> once, lazily, the first time a
+ * (id="boyle-hl-style") appended to <head> once, lazily, the first time a
  * highlight is applied — it defines the `::highlight(...)` rules and the
- * fallback `.cadence-hl*` classes. It is never removed (kept idempotent /
+ * fallback `.boyle-hl*` classes. It is never removed (kept idempotent /
  * cheap to leave behind) but has zero effect unless one of our classes or
  * highlight ranges is active.
  */
 
 import { GRADIENT_FROM, GRADIENT_TO } from '../../shared/constants.js';
 
-const STYLE_TAG_ID = 'cadence-hl-style';
+const STYLE_TAG_ID = 'boyle-hl-style';
 const VALID_STYLES = new Set(['gradient', 'solid', 'underline']);
 const HIGHLIGHT_NAMES = {
-  gradient: 'cadence-gradient',
-  solid: 'cadence-solid',
-  underline: 'cadence-underline',
+  gradient: 'boyle-gradient',
+  solid: 'boyle-solid',
+  underline: 'boyle-underline',
 };
 
 /** sentenceId -> internal record describing how to undo the highlight. */
@@ -91,20 +91,20 @@ function ensureGlobalStyleInjected() {
   text-decoration-color: ${underlineColor};
   text-decoration-thickness: 2px;
 }
-.cadence-hl--gradient, .cadence-hl-el--gradient {
+.boyle-hl--gradient, .boyle-hl-el--gradient {
   background-image: linear-gradient(90deg, ${GRADIENT_FROM}59, ${GRADIENT_TO}59);
   background-repeat: no-repeat;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   border-radius: 2px;
 }
-.cadence-hl--solid, .cadence-hl-el--solid {
+.boyle-hl--solid, .boyle-hl-el--solid {
   background-color: ${GRADIENT_FROM}52;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   border-radius: 2px;
 }
-.cadence-hl--underline, .cadence-hl-el--underline {
+.boyle-hl--underline, .boyle-hl-el--underline {
   background: none;
   text-decoration-line: underline;
   text-decoration-color: ${GRADIENT_TO};
@@ -258,7 +258,7 @@ export function apply(anchor, { style, sentenceId } = {}) {
       }
     }
 
-    const spans = wrapRangeFallback(anchor.range, `cadence-hl cadence-hl--${styleKey}`);
+    const spans = wrapRangeFallback(anchor.range, `boyle-hl boyle-hl--${styleKey}`);
     if (spans.length) {
       records.set(sentenceId, { kind: 'span', spans });
     }
@@ -266,7 +266,7 @@ export function apply(anchor, { style, sentenceId } = {}) {
   }
 
   if (anchor.kind === 'element' && anchor.element) {
-    const classNames = ['cadence-hl-el', `cadence-hl-el--${styleKey}`];
+    const classNames = ['boyle-hl-el', `boyle-hl-el--${styleKey}`];
     anchor.element.classList.add(...classNames);
     records.set(sentenceId, { kind: 'element', element: anchor.element, classNames });
   }

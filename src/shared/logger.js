@@ -2,7 +2,7 @@
  * src/shared/logger.js
  *
  * createLogger(scope) -> {debug, info, warn, error}, prefixed
- * '[cadence:scope]'. Silenced unless localStorage 'cadence:debug' is set (in
+ * '[boyle:scope]'. Silenced unless localStorage 'boyle:debug' is set (in
  * contexts where localStorage exists, e.g. content scripts / options page)
  * or the DEBUG constant below is flipped to true (useful in the background
  * service worker / offscreen document, which have no localStorage tied to a
@@ -21,7 +21,7 @@ const DEBUG = false;
 function isDebugEnabled() {
   if (DEBUG) return true;
   try {
-    return typeof localStorage !== 'undefined' && localStorage.getItem('cadence:debug') === '1';
+    return typeof localStorage !== 'undefined' && localStorage.getItem('boyle:debug') === '1';
   } catch {
     return false;
   }
@@ -32,7 +32,7 @@ function isDebugEnabled() {
  * @returns {{debug:Function, info:Function, warn:Function, error:Function}}
  */
 export function createLogger(scope) {
-  const prefix = `[cadence:${scope}]`;
+  const prefix = `[boyle:${scope}]`;
 
   const wrap = (consoleMethod) => (...args) => {
     if (!isDebugEnabled()) return;

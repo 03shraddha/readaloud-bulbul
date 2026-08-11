@@ -1,13 +1,13 @@
-# Cadence
+# Boyle
 
-Cadence is an unbranded, read-aloud Chrome extension. It works on any page —
+Boyle is an unbranded, read-aloud Chrome extension. It works on any page —
 articles, blogs, and other general websites, plus dedicated support for
 X/Twitter timelines. Click the toolbar icon and it extracts the readable
 content, splits it into sentences, synthesizes speech for each sentence via a
 small backend proxy, and plays them back in order with live sentence
 highlighting.
 
-> **Working codename.** "Cadence" is a project codename, not a Sarvam
+> **Working codename.** "Boyle" is a project codename, not a Sarvam
 > product name. **No Sarvam name, logo, or wordmark may appear anywhere in
 > this extension** — not in the manifest, the toolbar icon, the options
 > page, in-page widget, or any user-facing copy. Backend responses and code

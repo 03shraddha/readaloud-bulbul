@@ -45,7 +45,7 @@ const MAX_TOASTS = 3;
 /** Shadow-DOM host id for the resume banner — deliberately distinct from
  * SHADOW_ROOT_ID (the full widget's), since the two are separate mount
  * paths that are never meant to be conflated. */
-const RESUME_BANNER_ROOT_ID = 'cadence-resume-root';
+const RESUME_BANNER_ROOT_ID = 'boyle-resume-root';
 
 function formatRate(rate) {
   const n = Number(rate);
@@ -87,44 +87,44 @@ function defaultPlaybackState() {
 
 function buildMarkup() {
   return `
-<div class="cadence-toasts" data-role="toasts"></div>
-<div class="cadence-header" data-role="header">
-  <span class="cadence-grip">${ICONS.grip}</span>
-  <span class="cadence-title" data-role="title">Cadence</span>
-  <button type="button" class="cadence-icon-btn" data-action="settings" title="Settings" aria-haspopup="true" aria-expanded="false">${ICONS.gear}</button>
+<div class="boyle-toasts" data-role="toasts"></div>
+<div class="boyle-header" data-role="header">
+  <span class="boyle-grip">${ICONS.grip}</span>
+  <span class="boyle-title" data-role="title">Boyle</span>
+  <button type="button" class="boyle-icon-btn" data-action="settings" title="Settings" aria-haspopup="true" aria-expanded="false">${ICONS.gear}</button>
 </div>
-<div class="cadence-body" data-role="body">
-  <div class="cadence-status-row">
-    <span class="cadence-unit-label" data-role="unit-label"></span>
-    <span class="cadence-status-pill" data-role="status-pill">idle</span>
+<div class="boyle-body" data-role="body">
+  <div class="boyle-status-row">
+    <span class="boyle-unit-label" data-role="unit-label"></span>
+    <span class="boyle-status-pill" data-role="status-pill">idle</span>
   </div>
-  <div class="cadence-preview" data-role="preview"></div>
-  <div class="cadence-progress-track"><div class="cadence-progress-fill" data-role="progress-fill"></div></div>
-  <div class="cadence-progress-text" data-role="progress-text">— / —</div>
-  <div class="cadence-controls">
-    <button type="button" class="cadence-icon-btn" data-action="prev" title="Previous sentence" aria-label="Previous sentence">${ICONS.previous}</button>
-    <button type="button" class="cadence-icon-btn cadence-play-btn" data-action="toggle" title="Play / pause" aria-label="Play or pause">${ICONS.play}</button>
-    <button type="button" class="cadence-icon-btn" data-action="next" title="Next sentence" aria-label="Next sentence">${ICONS.next}</button>
-    <button type="button" class="cadence-icon-btn" data-action="stop" title="Stop" aria-label="Stop">${ICONS.stop}</button>
-    <span class="cadence-spacer"></span>
-    <button type="button" class="cadence-rate-btn" data-action="rate" title="Playback speed">1x</button>
+  <div class="boyle-preview" data-role="preview"></div>
+  <div class="boyle-progress-track"><div class="boyle-progress-fill" data-role="progress-fill"></div></div>
+  <div class="boyle-progress-text" data-role="progress-text">— / —</div>
+  <div class="boyle-controls">
+    <button type="button" class="boyle-icon-btn" data-action="prev" title="Previous sentence" aria-label="Previous sentence">${ICONS.previous}</button>
+    <button type="button" class="boyle-icon-btn boyle-play-btn" data-action="toggle" title="Play / pause" aria-label="Play or pause">${ICONS.play}</button>
+    <button type="button" class="boyle-icon-btn" data-action="next" title="Next sentence" aria-label="Next sentence">${ICONS.next}</button>
+    <button type="button" class="boyle-icon-btn" data-action="stop" title="Stop" aria-label="Stop">${ICONS.stop}</button>
+    <span class="boyle-spacer"></span>
+    <button type="button" class="boyle-rate-btn" data-action="rate" title="Playback speed">1x</button>
   </div>
-  <div class="cadence-popover-wrap">
-    <div class="cadence-settings-popover" data-role="settings-popover" hidden>
-      <div class="cadence-settings-title">Settings</div>
-      <label class="cadence-setting-row" data-key="autoScroll" data-checked="true">
+  <div class="boyle-popover-wrap">
+    <div class="boyle-settings-popover" data-role="settings-popover" hidden>
+      <div class="boyle-settings-title">Settings</div>
+      <label class="boyle-setting-row" data-key="autoScroll" data-checked="true">
         <span>Auto-scroll</span>
-        <span class="cadence-switch"></span>
+        <span class="boyle-switch"></span>
         <input type="checkbox" data-toggle="autoScroll" checked />
       </label>
-      <label class="cadence-setting-row" data-key="skipPromoted" data-checked="true">
+      <label class="boyle-setting-row" data-key="skipPromoted" data-checked="true">
         <span>Skip promoted</span>
-        <span class="cadence-switch"></span>
+        <span class="boyle-switch"></span>
         <input type="checkbox" data-toggle="skipPromoted" checked />
       </label>
-      <label class="cadence-setting-row" data-key="announceRetweets" data-checked="true">
+      <label class="boyle-setting-row" data-key="announceRetweets" data-checked="true">
         <span>Announce retweets</span>
-        <span class="cadence-switch"></span>
+        <span class="boyle-switch"></span>
         <input type="checkbox" data-toggle="announceRetweets" checked />
       </label>
     </div>
@@ -205,7 +205,7 @@ export function createWidget({ onControl } = {}) {
     const text = lastState?.currentText || '';
     refs.preview.textContent = text;
     const isFallback = fallbackText != null && text === fallbackText;
-    refs.preview.classList.toggle('cadence-preview--fallback', isFallback);
+    refs.preview.classList.toggle('boyle-preview--fallback', isFallback);
   }
 
   function updateProgress() {
@@ -261,7 +261,7 @@ export function createWidget({ onControl } = {}) {
     fallbackText = text ?? '';
     if (!hostEl) return;
     refs.preview.textContent = fallbackText;
-    refs.preview.classList.add('cadence-preview--fallback');
+    refs.preview.classList.add('boyle-preview--fallback');
   }
 
   /**
@@ -272,10 +272,10 @@ export function createWidget({ onControl } = {}) {
     if (!hostEl) return;
     const safeLevel = ['info', 'warn', 'error'].includes(level) ? level : 'info';
     const el = document.createElement('div');
-    el.className = `cadence-toast cadence-toast--${safeLevel}`;
+    el.className = `boyle-toast boyle-toast--${safeLevel}`;
     const icon = safeLevel === 'info' ? ICONS.info : ICONS.warning;
-    el.innerHTML = `<span class="cadence-toast-icon">${icon}</span><span class="cadence-toast-msg"></span>`;
-    el.querySelector('.cadence-toast-msg').textContent = message ?? '';
+    el.innerHTML = `<span class="boyle-toast-icon">${icon}</span><span class="boyle-toast-msg"></span>`;
+    el.querySelector('.boyle-toast-msg').textContent = message ?? '';
     refs.toasts.appendChild(el);
 
     while (refs.toasts.children.length > MAX_TOASTS) {
@@ -337,7 +337,7 @@ export function createWidget({ onControl } = {}) {
       input.addEventListener('change', () => {
         const key = input.dataset.toggle;
         const value = input.checked;
-        const row = input.closest('.cadence-setting-row');
+        const row = input.closest('.boyle-setting-row');
         if (row) row.dataset.checked = String(value);
         onControl?.(MSG.CONTROL_SET_OPTION, { key, value });
       });
@@ -417,7 +417,7 @@ export function createWidget({ onControl } = {}) {
     shadow.appendChild(styleEl);
 
     const container = document.createElement('div');
-    container.className = 'cadence-widget';
+    container.className = 'boyle-widget';
     container.innerHTML = buildMarkup();
     shadow.appendChild(container);
 
@@ -462,12 +462,12 @@ export function createWidget({ onControl } = {}) {
 
 function buildResumeBannerMarkup() {
   return `
-<button type="button" class="cadence-resume-banner-close" data-action="close" aria-label="Dismiss">${ICONS.close}</button>
-<div class="cadence-resume-banner-title">Resume reading?</div>
-<div class="cadence-resume-banner-preview" data-role="preview"></div>
-<div class="cadence-resume-banner-actions">
-  <button type="button" class="cadence-btn cadence-btn--secondary" data-action="start-over">Start over</button>
-  <button type="button" class="cadence-btn cadence-btn--primary" data-action="resume">Resume</button>
+<button type="button" class="boyle-resume-banner-close" data-action="close" aria-label="Dismiss">${ICONS.close}</button>
+<div class="boyle-resume-banner-title">Resume reading?</div>
+<div class="boyle-resume-banner-preview" data-role="preview"></div>
+<div class="boyle-resume-banner-actions">
+  <button type="button" class="boyle-btn boyle-btn--secondary" data-action="start-over">Start over</button>
+  <button type="button" class="boyle-btn boyle-btn--primary" data-action="resume">Resume</button>
 </div>
 `;
 }
@@ -504,7 +504,7 @@ function createResumeBanner({ onDecision } = {}) {
     shadow.appendChild(styleEl);
 
     const container = document.createElement('div');
-    container.className = 'cadence-resume-banner';
+    container.className = 'boyle-resume-banner';
     container.innerHTML = buildResumeBannerMarkup();
     shadow.appendChild(container);
 

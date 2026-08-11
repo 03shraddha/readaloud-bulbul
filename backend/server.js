@@ -72,7 +72,7 @@ export function createServer() {
       });
       return;
     }
-    console.error('[cadence-backend] unhandled error:', err?.message || err);
+    console.error('[boyle-backend] unhandled error:', err?.message || err);
     res.status(500).json({
       error: {
         code: 'INTERNAL',
@@ -89,13 +89,13 @@ export function createServer() {
 function logStartupWarnings() {
   if (!config.sarvamApiKey) {
     console.warn('!'.repeat(70));
-    console.warn('[cadence-backend] WARNING: SARVAM_API_KEY is not set.');
-    console.warn('[cadence-backend] Falling back to MOCK_TTS mode automatically.');
-    console.warn('[cadence-backend] Copy backend/.env.example to backend/.env and set');
-    console.warn('[cadence-backend] SARVAM_API_KEY to talk to the real Bulbul v3 API.');
+    console.warn('[boyle-backend] WARNING: SARVAM_API_KEY is not set.');
+    console.warn('[boyle-backend] Falling back to MOCK_TTS mode automatically.');
+    console.warn('[boyle-backend] Copy backend/.env.example to backend/.env and set');
+    console.warn('[boyle-backend] SARVAM_API_KEY to talk to the real Bulbul v3 API.');
     console.warn('!'.repeat(70));
   } else if (config.mockTts) {
-    console.log('[cadence-backend] MOCK_TTS=1 — serving mock synthesis, no upstream calls.');
+    console.log('[boyle-backend] MOCK_TTS=1 — serving mock synthesis, no upstream calls.');
   }
 }
 
@@ -109,7 +109,7 @@ if (isMainModule) {
   const app = createServer();
   app.listen(config.port, () => {
     console.log(
-      `[cadence-backend] listening on http://localhost:${config.port} (mock=${isMockMode()})`
+      `[boyle-backend] listening on http://localhost:${config.port} (mock=${isMockMode()})`
     );
   });
 }
