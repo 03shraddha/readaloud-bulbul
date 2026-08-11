@@ -28,7 +28,7 @@ export const SAMPLE_RATES = [8000, 16000, 22050, 24000, 32000, 44100, 48000];
 
 export const CODECS = ['wav', 'mp3', 'linear16', 'mulaw', 'alaw', 'opus', 'flac', 'aac'];
 
-export const DEFAULT_SPEAKER = 'shubh';
+export const DEFAULT_SPEAKER = 'simran';
 
 export const DEFAULTS = Object.freeze({
   language_code: 'en-IN',

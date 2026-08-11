@@ -32,6 +32,7 @@ import { extractStatusId } from './lib/x-tweet-parser.js';
 import { groupTweetsIntoUnits } from './lib/x-thread-grouper.js';
 import { createTimelineFeeder } from './lib/x-timeline-feeder.js';
 import { extractArticleUnits, resolveArticleAnchor, ensureArticleVisible } from './lib/x-article-parser.js';
+import { scrollIntoViewSmart } from './lib/scroll.js';
 
 const HOST_RE = /(^|\.)(x|twitter)\.com$/i;
 
@@ -296,11 +297,11 @@ async function ensureVisible(sentence) {
   if (!article) return false;
 
   if (state.settings.autoScroll) {
-    try {
-      article.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    } catch {
-      /* best-effort only */
-    }
+    // No-ops when `article` is already comfortably on screen -- without
+    // this, a thread/tweet with several sentences re-centers the viewport
+    // on every single one, which visibly races ahead of the actual reading
+    // pace. See lib/scroll.js.
+    scrollIntoViewSmart(article, { behavior: 'smooth', block: 'center' });
   }
   return true;
 }

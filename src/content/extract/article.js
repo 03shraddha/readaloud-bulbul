@@ -21,6 +21,7 @@ import { createLogger } from '../../shared/logger.js';
 
 import { findBestContainer, shouldStripElement } from './lib/readability-lite.js';
 import { isElementVisible } from './lib/visibility.js';
+import { scrollIntoViewSmart } from './lib/scroll.js';
 import { isCodeBlock, isTable, summarizeCodeBlock, summarizeTable, summarizeImage } from './lib/block-summarizer.js';
 import { extractSentencesWithLocators, resolveLocatorToRange, resolveNodeFromPath } from './lib/range-mapper.js';
 import { walkDOM } from './lib/dom-walk.js';
@@ -368,9 +369,11 @@ const articleExtractor = {
       if (!autoScroll) return true; // scrolling disabled by settings; nothing to do, not a failure
 
       const target = getScrollTarget(sentence);
-      if (!target || typeof target.scrollIntoView !== 'function') return false;
+      if (!target) return false;
 
-      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      // No-ops when the target is already comfortably on screen, instead of
+      // re-centering on every single sentence -- see lib/scroll.js.
+      scrollIntoViewSmart(target, { behavior: 'smooth', block: 'center' });
       return true;
     } catch (err) {
       log.error('ensureVisible failed', err);

@@ -1,10 +1,24 @@
 /**
- * src/content/ui/auto-scroll.js
+ * src/content/extract/lib/scroll.js
  *
  * scrollIntoViewSmart(target, opts) centers a Range or Element in the
  * viewport, no-ops when it is already comfortably visible, and suspends
  * itself for a few seconds after it detects a manual user scroll/wheel/touch
  * gesture so it never fights the user for control of the page.
+ *
+ * Lives under extract/lib/ (moved from content/ui/) because its callers are
+ * the extractors' ensureVisible() implementations, not any widget UI code --
+ * twitter.js's own doc comment says extractors don't import from content/ui/,
+ * and this is plain DOM-scroll logic, not a rendered UI component.
+ *
+ * The "no-op when already comfortably visible" behavior is the fix for a
+ * real bug: calling `target.scrollIntoView({block:'center', behavior:
+ * 'smooth'})` unconditionally on EVERY sentence re-centers the viewport
+ * every single time, even when several short sentences in a row are all
+ * already on-screen. Each call restarts/retargets the smooth-scroll
+ * animation, which visibly races ahead of the actual reading pace. Skipping
+ * the call entirely when nothing needs to move is what keeps the page
+ * settled in place until it genuinely needs to catch up.
  */
 
 // How long auto-scroll stays suspended after a detected manual gesture.

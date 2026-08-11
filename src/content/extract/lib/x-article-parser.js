@@ -37,6 +37,7 @@ import { summarizeImage } from './block-summarizer.js';
 import { isElementVisible } from './visibility.js';
 import { extractSentencesWithLocators, resolveLocatorToRange } from './range-mapper.js';
 import { SELECTORS, querySelector } from './x-selectors.js';
+import { scrollIntoViewSmart } from './scroll.js';
 
 /**
  * @param {Location} location
@@ -248,12 +249,11 @@ export function ensureArticleVisible(locator) {
 
   const target =
     locator.kind === 'element' ? locator.element : locator.startNode?.parentElement || locator.containerRef;
-  if (!target || typeof target.scrollIntoView !== 'function') return false;
+  if (!target) return false;
 
-  try {
-    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  } catch {
-    /* best-effort only */
-  }
+  // No-ops when already comfortably on screen -- an Article body reads
+  // through many short sentences per paragraph block; re-centering on every
+  // one would visibly race ahead of the actual reading pace. See scroll.js.
+  scrollIntoViewSmart(target, { behavior: 'smooth', block: 'center' });
   return true;
 }
