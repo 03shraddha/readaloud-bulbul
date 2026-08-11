@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Cadence",
   "version": "0.1.0",
-  "description": "Read the page aloud — sentence-by-sentence text-to-speech for articles and X/Twitter timelines.",
+  "description": "Read any page aloud — sentence-by-sentence text-to-speech that works on articles, blogs, and social feeds, including X/Twitter timelines.",
   "background": {
     "service_worker": "src/background/service-worker.js",
     "type": "module"

@@ -1,9 +1,11 @@
 # Cadence
 
-Cadence is an unbranded, read-aloud Chrome extension. Click the toolbar icon
-on an article or an X/Twitter timeline and it extracts the readable content,
-splits it into sentences, synthesizes speech for each sentence via a small
-backend proxy, and plays them back in order with live sentence highlighting.
+Cadence is an unbranded, read-aloud Chrome extension. It works on any page —
+articles, blogs, and other general websites, plus dedicated support for
+X/Twitter timelines. Click the toolbar icon and it extracts the readable
+content, splits it into sentences, synthesizes speech for each sentence via a
+small backend proxy, and plays them back in order with live sentence
+highlighting.
 
 > **Working codename.** "Cadence" is a project codename, not a Sarvam
 > product name. **No Sarvam name, logo, or wordmark may appear anywhere in
@@ -54,7 +56,8 @@ tone) so you can try the extension without one.
 - Pin the toolbar icon
 
 **5. Use it.**
-- Open an article, or go to `x.com` and log in
+- Open any page you want read aloud — an article, a blog post, or `x.com`
+  (log in first for that one)
 - Click the toolbar icon to start reading
 - Use the floating widget for play/pause, speed, and skip
 
