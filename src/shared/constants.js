@@ -17,8 +17,15 @@ export const MAX_SENTENCE_CHARS = 900;
 export const BULBUL_MAX_CHARS = 2500;
 
 // --- Audio pipeline ---
-export const PREFETCH_AHEAD = 3;
-export const TTS_CONCURRENCY = 2;
+// Raised from 3/2 after real (non-mock) testing showed the buffer eroding
+// over a reading session -- Bulbul v3's real per-sentence latency is close
+// enough to each sentence's own audio duration that a 3-sentence lead
+// doesn't stay ahead for long. More buffer depth + more concurrent
+// requests gives synthesis more room to stay ahead of playback; it can't
+// eliminate the first-sentence-of-a-session cold start (nothing to
+// prefetch before the read begins), only the sustained per-sentence gap.
+export const PREFETCH_AHEAD = 6;
+export const TTS_CONCURRENCY = 3;
 export const TICK_INTERVAL_MS = 250;
 
 // --- Persistence ---
