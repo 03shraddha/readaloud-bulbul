@@ -60,6 +60,26 @@ export const SELECTORS = Object.freeze({
    * optional and deliberately coarse.
    */
   quoteContainer: { selector: 'div[role="link"][tabindex="0"]', optional: true },
+
+  /**
+   * X's long-form "Articles" feature (opened from a status page): a
+   * COMPLETELY SEPARATE `<article>` element from `SELECTORS.article` above
+   * -- confirmed by direct DOM inspection, since none of this is publicly
+   * documented. `[data-testid="tweetText"]` never appears inside it, which
+   * is why the ordinary tweet-text path finds nothing and this needs its
+   * own extraction (see lib/x-article-parser.js). Absent on every normal
+   * tweet/timeline page, so always optional.
+   */
+  articleReadView: { selector: 'article[data-testid="twitterArticleReadView"]', optional: true },
+
+  /** The article's own title, distinct from `document.title`. */
+  articleTitle: { selector: '[data-testid="twitter-article-title"]', optional: true },
+
+  /** Wraps the actual body content (paragraphs, images, headings). */
+  articleRichText: { selector: '[data-testid="twitterArticleRichTextView"]', optional: true },
+
+  /** The direct ancestor of the real sibling-block list inside articleRichText. */
+  articleRichTextComponent: { selector: '[data-testid="longformRichTextComponent"]', optional: true },
 });
 
 /**

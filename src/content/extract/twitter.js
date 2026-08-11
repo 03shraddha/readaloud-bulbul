@@ -31,6 +31,7 @@ import { SELECTORS, querySelector, queryAll } from './lib/x-selectors.js';
 import { extractStatusId } from './lib/x-tweet-parser.js';
 import { groupTweetsIntoUnits } from './lib/x-thread-grouper.js';
 import { createTimelineFeeder } from './lib/x-timeline-feeder.js';
+import { extractArticleUnits, resolveArticleAnchor, ensureArticleVisible } from './lib/x-article-parser.js';
 
 const HOST_RE = /(^|\.)(x|twitter)\.com$/i;
 
@@ -93,12 +94,25 @@ function computeContentHash(units) {
  */
 async function extract() {
   const tweetDataList = state.feeder ? await state.feeder.extractInitialBatch() : [];
-  const units = groupTweetsIntoUnits(tweetDataList, state.settings);
+  let units = groupTweetsIntoUnits(tweetDataList, state.settings);
+
+  // X's long-form Article view (see lib/x-article-parser.js doc comment):
+  // when present, it's the real content -- the underlying tweetData for
+  // that same status is a near-empty stub (no tweetText at all), so drop it
+  // in favor of the article's own units rather than reading both.
+  const article = extractArticleUnits({ languageCode: state.settings.languageCode || 'en-IN' });
+  if (article) {
+    units = units.filter(
+      (u) => u.meta?.statusId !== article.statusId && u.meta?.rootStatusId !== article.statusId
+    );
+    units = [...article.units, ...units];
+  }
+
   return {
     units,
     contentKey: twitterContentKey(location),
     contentHash: computeContentHash(units),
-    title: document.title,
+    title: article?.title || document.title,
     exhausted: false,
   };
 }
@@ -191,6 +205,7 @@ function findRangeForFingerprint(containerEl, fingerprint) {
 async function resolveAnchor(sentence) {
   const locator = sentence?.locator;
   if (!locator) return null;
+  if (locator.articleView) return resolveArticleAnchor(locator);
   if (locator.part === 'thread-cue') return null; // synthetic — no DOM node represents it
 
   const article = findArticleByStatusId(locator.statusId);
@@ -260,7 +275,9 @@ async function resolveAnchor(sentence) {
  */
 async function ensureVisible(sentence) {
   const locator = sentence?.locator;
-  if (!locator || locator.part === 'thread-cue') return false;
+  if (!locator) return false;
+  if (locator.articleView) return ensureArticleVisible(locator);
+  if (locator.part === 'thread-cue') return false;
 
   let article = findArticleByStatusId(locator.statusId);
 
