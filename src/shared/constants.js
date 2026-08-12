@@ -40,7 +40,10 @@ export const SESSION_SNAPSHOT_TTL_MS = 60 * 60 * 1000; // 1 hour
 export const EXTRACT_MORE_TIMEOUT_MS = 8000;
 
 // --- Playback rate options ---
-export const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
+export const RATES = [0.75, 1, 1.2, 1.25, 1.5, 1.75, 2];
+// shubh reads a bit slow at 1x -- default a notch faster; 1x stays one
+// click away on the rate selector for anyone who wants it back.
+export const DEFAULT_RATE = 1.2;
 
 // --- Languages / voice ---
 export const SUPPORTED_LANGUAGES = [

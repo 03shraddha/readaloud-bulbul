@@ -24,6 +24,7 @@ import {
 import {
   DEFAULT_BACKEND_BASE_URL,
   DEFAULT_SPEAKER,
+  DEFAULT_RATE,
   MAX_PROGRESS_ENTRIES,
 } from './constants.js';
 
@@ -35,7 +36,7 @@ function defaultSettings() {
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     backendBaseUrl: DEFAULT_BACKEND_BASE_URL,
-    rate: 1.0,
+    rate: DEFAULT_RATE,
     languageCode: 'en-IN',
     speaker: DEFAULT_SPEAKER,
     pace: 1.0,

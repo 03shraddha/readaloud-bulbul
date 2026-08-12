@@ -16,7 +16,7 @@
  */
 
 import { MSG, TARGET, makeEnvelope, safeSendTabMessage } from '../shared/messages.js';
-import { RATES, SESSION_SNAPSHOT_TTL_MS } from '../shared/constants.js';
+import { RATES, DEFAULT_RATE, SESSION_SNAPSHOT_TTL_MS } from '../shared/constants.js';
 import { createLogger } from '../shared/logger.js';
 import { PrefetchQueue } from './prefetch-queue.js';
 import * as offscreenManager from './offscreen-manager.js';
@@ -40,7 +40,7 @@ function genSessionId() {
  */
 function clampRate(rate) {
   const n = Number(rate);
-  if (!Number.isFinite(n)) return 1.0;
+  if (!Number.isFinite(n)) return DEFAULT_RATE;
   return Math.min(MAX_RATE, Math.max(MIN_RATE, n));
 }
 
@@ -58,7 +58,7 @@ function idlePlaybackState() {
     currentText: '',
     totalSentences: 0,
     exhausted: false,
-    rate: persistence.getCachedSettings()?.rate ?? 1.0,
+    rate: persistence.getCachedSettings()?.rate ?? DEFAULT_RATE,
     queuedAhead: 0,
     contentKey: null,
     kind: null,
@@ -87,11 +87,15 @@ class Session {
 
     this.cursor = -1;
     this.status = 'extracting';
-    this.rate = persistence.getCachedSettings()?.rate ?? 1.0;
+    this.rate = persistence.getCachedSettings()?.rate ?? DEFAULT_RATE;
     this.exhausted = false;
     this.totalSentences = 0;
     this.error = null;
     this.destroyed = false;
+    /** Whether beginPlayback() has ever run -- guards the first Play click
+     * doing real startup (prefetch + offscreen) vs. a later one just
+     * resuming audio. See markReady()/handleControlPlay(). */
+    this.playbackStarted = false;
 
     /** @type {Map<number, number|null>} index -> durationHintMs, cleared once consumed */
     this.durationHints = new Map();
@@ -202,6 +206,17 @@ class Session {
     }
   }
 
+  /**
+   * Extraction is done and the session is ready, but nothing plays until
+   * the user actually presses Play (handleControlPlay) -- activating the
+   * extension should never start audio on its own.
+   */
+  markReady() {
+    if (this.status === 'stopped' || this.destroyed) return;
+    this.status = 'paused';
+    this.emitPlaybackState();
+  }
+
   /** Kick off prefetching + audio playback for the current cursor. */
   beginPlayback() {
     this.status = 'buffering';
@@ -228,6 +243,16 @@ class Session {
 
   handleControlPlay() {
     if (this.status === 'stopped' || this.status === 'error' || this.destroyed) return;
+
+    // First-ever Play for this session: nothing has been prefetched or
+    // handed to the offscreen document yet (markReady() deliberately
+    // skipped that) -- do the real startup now instead of just resuming.
+    if (!this.playbackStarted) {
+      this.playbackStarted = true;
+      this.beginPlayback();
+      return;
+    }
+
     offscreenManager.sendToOffscreen(makeEnvelope(MSG.AUDIO_PLAY, TARGET.OFFSCREEN, this.sessionId, {}));
     if (this.status !== 'buffering') this.status = 'playing';
     this.emitPlaybackState();
@@ -664,7 +689,11 @@ export function handleStartReading(payload, tabId, incomingSessionId) {
     persistence.clearPendingResume(tabId);
   }
 
-  session.beginPlayback();
+  // Extraction finishing does not mean the user wants audio yet -- activating
+  // the extension should land on a ready-to-go, paused widget; playback only
+  // starts once they press Play (handleControlPlay does the real startup the
+  // first time). See markReady()/handleControlPlay().
+  session.markReady();
 }
 
 /**

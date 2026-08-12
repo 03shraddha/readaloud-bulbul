@@ -34,7 +34,7 @@
  */
 
 import { MSG, TARGET, makeEnvelope, safeSendRuntimeMessage } from '../../shared/messages.js';
-import { SHADOW_ROOT_ID, WIDGET_Z_INDEX, RATES } from '../../shared/constants.js';
+import { SHADOW_ROOT_ID, WIDGET_Z_INDEX, RATES, DEFAULT_RATE } from '../../shared/constants.js';
 import { getWidgetStyles, getResumeBannerStyles } from './widget-styles.js';
 import { ICONS } from './icons.js';
 
@@ -77,7 +77,7 @@ function defaultPlaybackState() {
     currentText: '',
     totalSentences: 0,
     exhausted: false,
-    rate: 1,
+    rate: DEFAULT_RATE,
     queuedAhead: 0,
     contentKey: null,
     kind: null,
@@ -105,7 +105,7 @@ function buildMarkup() {
     <button type="button" class="boyle-icon-btn" data-action="next" title="Next sentence" aria-label="Next sentence">${ICONS.next}</button>
     <button type="button" class="boyle-icon-btn" data-action="stop" title="Stop" aria-label="Stop">${ICONS.stop}</button>
     <span class="boyle-spacer"></span>
-    <button type="button" class="boyle-rate-btn" data-action="rate" title="Playback speed">1x</button>
+    <button type="button" class="boyle-rate-btn" data-action="rate" title="Playback speed">${formatRate(DEFAULT_RATE)}</button>
   </div>
   <div class="boyle-popover-wrap">
     <div class="boyle-settings-popover" data-role="settings-popover" hidden>
@@ -218,7 +218,7 @@ export function createWidget({ onControl } = {}) {
     refs.nextBtn.disabled = !hasSession;
     refs.stopBtn.disabled = state.status === 'idle';
 
-    refs.rateBtn.textContent = formatRate(state.rate ?? 1);
+    refs.rateBtn.textContent = formatRate(state.rate ?? DEFAULT_RATE);
     refs.statusPill.textContent = state.status;
     refs.unitLabel.textContent = state.unitLabel || '';
   }
@@ -309,7 +309,7 @@ export function createWidget({ onControl } = {}) {
     refs.stopBtn.addEventListener('click', () => onControl?.(MSG.CONTROL_STOP, {}));
 
     refs.rateBtn.addEventListener('click', () => {
-      const idx = nearestRateIndex(lastState?.rate ?? 1);
+      const idx = nearestRateIndex(lastState?.rate ?? DEFAULT_RATE);
       const next = RATES[(idx + 1) % RATES.length];
       refs.rateBtn.textContent = formatRate(next);
       onControl?.(MSG.CONTROL_SET_RATE, { rate: next });
