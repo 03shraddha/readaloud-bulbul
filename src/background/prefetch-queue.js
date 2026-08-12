@@ -184,6 +184,19 @@ export class PrefetchQueue {
     this.expectedOffscreenCursor = resumeFrom;
     this.awaitingMoreUnits = false;
     this.clearStallTimer();
+
+    // The dead index we just skipped past may have been the LAST sentence of
+    // an already-exhausted session. offscreen's AudioQueue.flush() clears its
+    // queue down to empty in that case but — unlike a sentence actually
+    // reaching its natural end — never emits QUEUE_DRAINED, so
+    // handleQueueDrained()'s completion check below would never get a chance
+    // to run and the session would sit frozen forever with cursor sitting at
+    // totalSentences. Run that identical completion check here explicitly.
+    if (this.isExhaustedPastEnd()) {
+      session.endSession('completed', 'Last sentence could not be voiced.');
+      return;
+    }
+
     this.fill();
   }
 
@@ -237,12 +250,47 @@ export class PrefetchQueue {
       session.emitPlaybackState();
     }
 
+    this._armStallTimer();
+  }
+
+  /**
+   * (Re-)arms the 15s stall timeout that ends the session if
+   * REQUEST_MORE_UNITS goes unanswered. Shared by requestMoreUnits() and
+   * rearmStallTimerIfAwaiting() (called from session.js on resume).
+   */
+  _armStallTimer() {
+    const session = this.session;
     this.clearStallTimer();
     this.stallTimer = setTimeout(() => {
       this.stallTimer = null;
+
+      // A paused session is not broken -- the user may just have stepped
+      // away. Ending it here would silently kill a session that was doing
+      // nothing wrong except sitting paused for >15s. Defer: leave
+      // awaitingMoreUnits set and let rearmStallTimerIfAwaiting() (called
+      // from session.js's handleControlPlay on resume) pick this back up
+      // with a fresh timeout, so a genuinely-never-arriving response can
+      // still eventually end the session once playback actually resumes.
+      if (session.status === 'paused') {
+        log.debug(`stall timeout fired while paused (session ${session.sessionId}); deferring to resume`);
+        return;
+      }
+
       log.warn(`stall timeout waiting for more units (session ${session.sessionId}); ending as completed`);
       session.endSession('completed', 'No more content arrived.');
     }, STALL_TIMEOUT_MS);
+  }
+
+  /**
+   * Called by session.js's handleControlPlay when resuming from pause: if a
+   * REQUEST_MORE_UNITS is still outstanding and its stall timer was deferred
+   * while paused (see _armStallTimer()), re-arm a fresh one now that the
+   * session is live again. No-op if nothing is outstanding, the queue is
+   * stopped, or a timer is already ticking.
+   */
+  rearmStallTimerIfAwaiting() {
+    if (!this.awaitingMoreUnits || this.stopped || this.stallTimer) return;
+    this._armStallTimer();
   }
 
   /**
@@ -303,6 +351,19 @@ export class PrefetchQueue {
   }
 
   /**
+   * True once there is nothing left this queue could ever fetch: content is
+   * exhausted (no more APPEND_UNITS coming, see Session.exhausted) and
+   * nextToFetch has already reached the end of all known sentences. Shared
+   * by handleQueueDrained() (the "last sentence finished playing normally"
+   * completion path) and skipDeadIndex() (the "last sentence turned out to
+   * be unplayable" completion path) — both need the identical check.
+   * @returns {boolean}
+   */
+  isExhaustedPastEnd() {
+    return this.session.exhausted && this.nextToFetch >= this.session.totalSentences;
+  }
+
+  /**
    * offscreen -> background QUEUE_DRAINED: everything queued has finished
    * playing. If we have nothing left to give it and content is exhausted,
    * the session is done; otherwise ask for more and enter 'buffering'.
@@ -312,7 +373,7 @@ export class PrefetchQueue {
     const session = this.session;
     if (this.dispatched.length > 0 || this.inFlight.size > 0) return; // more is already on the way
 
-    if (session.exhausted && this.nextToFetch >= session.totalSentences) {
+    if (this.isExhaustedPastEnd()) {
       session.endSession('completed');
       return;
     }

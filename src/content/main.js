@@ -14,7 +14,10 @@
  *  - On HIGHLIGHT_SENTENCE: run the ensureVisible -> resolveAnchor ->
  *    highlighter/fallback sequence and reply HIGHLIGHT_RESULT.
  *  - Forward PLAYBACK_STATE / CLEAR_HIGHLIGHT / RESUME_AVAILABLE /
- *    SESSION_ENDED / TOAST to the widget.
+ *    SESSION_ENDED / TOAST to the widget. PLAYBACK_STATE additionally gets
+ *    an `upcoming` field (a short locator-free window of the next few
+ *    sentences from sentenceMap) attached for the widget's click-to-seek
+ *    list -- see computeUpcomingSentences().
  *  - Forward widget control callbacks to the background as CONTROL_*.
  *  - Tear down on pagehide and on SPA URL change (X pushState); an SPA
  *    navigation also sends CONTROL_STOP so the background session actually
@@ -53,6 +56,18 @@ let currentSettings = {};
 /** sentenceId of the highlight currently applied, so we can clear it. */
 let activeHighlightId = null;
 
+/**
+ * Monotonic counter tagging each handleHighlightSentence() invocation.
+ * ensureVisible()/resolveAnchor() latency varies wildly per sentence (a
+ * near-instant DOM lookup vs. multi-second tweet-mount search), so an older
+ * HIGHLIGHT_SENTENCE call can still be in-flight when a newer one for a
+ * later sentence arrives and finishes first. Comparing a call's captured
+ * requestId against this counter right before it touches the highlighter is
+ * how it detects "a newer request has since taken over" and bails out
+ * instead of clobbering the correct, current highlight.
+ */
+let highlightRequestSeq = 0;
+
 /** @type {import('../shared/types.js').Extractor|null} */
 let activeExtractor = null;
 
@@ -61,6 +76,12 @@ const sentenceMap = new Map();
 
 /** Monotonic cursor for Sentence.index, never reused within a session. */
 let nextSentenceIndex = 0;
+
+/**
+ * How many sentences ahead of the current cursor to offer in the widget's
+ * click-to-seek list (see computeUpcomingSentences() / forwardToWidget()).
+ */
+const UPCOMING_WINDOW_SIZE = 8;
 
 /** @type {ReturnType<typeof import('./ui/widget.js')>|null} */
 let widgetModule = null;
@@ -217,14 +238,30 @@ async function handleRequestMoreUnits(payload) {
 }
 
 /**
+ * @param {number} requestId - value captured at the top of the
+ *   handleHighlightSentence() call being checked
+ * @returns {boolean} true if a newer HIGHLIGHT_SENTENCE has started since,
+ *   meaning this call is superseded and must not touch shared state
+ */
+function isStaleHighlightRequest(requestId) {
+  return requestId !== highlightRequestSeq;
+}
+
+/**
  * The §10 highlight/fallback protocol.
  * @param {import('../shared/types.js').HighlightSentencePayload} payload
  */
 async function handleHighlightSentence(payload) {
+  const requestId = ++highlightRequestSeq;
   const sentence = sentenceMap.get(payload.sentenceId);
   const widget = await getWidget();
 
   if (!sentence || !activeExtractor) {
+    // Superseded while awaiting the widget module: a newer request already
+    // owns activeHighlightId, so leave it alone and skip HIGHLIGHT_RESULT
+    // entirely -- background/session.js's handler is a diagnostic sink, not
+    // a per-request handshake, so silently no-op-ing here is safe.
+    if (isStaleHighlightRequest(requestId)) return;
     await clearActiveHighlight();
     widget?.showTextFallback?.(payload.text);
     await safeSendRuntimeMessage(
@@ -242,8 +279,18 @@ async function handleHighlightSentence(payload) {
     await activeExtractor.ensureVisible(sentence);
     const anchor = await activeExtractor.resolveAnchor(sentence);
 
+    // ensureVisible()/resolveAnchor() together can take anywhere from
+    // near-instant to multiple seconds (extractor-dependent). If a later
+    // HIGHLIGHT_SENTENCE has already resolved and become the active one
+    // while we were awaiting those, we are stale: bail out now, before
+    // touching the highlighter, activeHighlightId, or sending a result --
+    // the newer request already did all of that correctly, and clearing or
+    // re-highlighting on its behalf would be a visible backward jump.
+    if (isStaleHighlightRequest(requestId)) return;
+
     if (anchor) {
       const highlighter = await getHighlighter();
+      if (isStaleHighlightRequest(requestId)) return;
       // Nothing else clears the previous sentence's highlight, so without
       // this every read sentence would stay lit for the whole session.
       if (activeHighlightId && activeHighlightId !== payload.sentenceId) {
@@ -253,6 +300,10 @@ async function handleHighlightSentence(payload) {
         sentenceId: payload.sentenceId,
         style: currentSettings.highlightStyle,
       });
+      // apply() is itself async and can race the same way; re-check right
+      // before claiming ownership so a stale apply() never overwrites the
+      // newer highlight it just finished painting over.
+      if (isStaleHighlightRequest(requestId)) return;
       activeHighlightId = payload.sentenceId;
       await safeSendRuntimeMessage(
         makeEnvelope(MSG.HIGHLIGHT_RESULT, TARGET.BACKGROUND, sessionId, {
@@ -275,6 +326,7 @@ async function handleHighlightSentence(payload) {
     }
   } catch (err) {
     log.error('highlight failed', err);
+    if (isStaleHighlightRequest(requestId)) return;
     await clearActiveHighlight();
     widget?.showTextFallback?.(payload.text);
     await safeSendRuntimeMessage(
@@ -304,8 +356,37 @@ async function handleClearHighlight(payload) {
   }
 }
 
+/**
+ * A short, locator-free preview of the sentences just ahead of the current
+ * cursor, for the widget's click-to-seek list. Scans sentenceMap the same
+ * way assignIndicesAndStrip() builds its locator-free copies -- the
+ * locator never leaves this file. The window starts strictly AFTER
+ * fromIndex, so the sentence currently playing is never included.
+ * @param {number} fromIndex - PlaybackState.index (may be -1 when idle)
+ * @returns {Array<{index:number, text:string}>}
+ */
+function computeUpcomingSentences(fromIndex) {
+  const upcoming = [];
+  for (const sentence of sentenceMap.values()) {
+    if (sentence.index > fromIndex && sentence.index <= fromIndex + UPCOMING_WINDOW_SIZE) {
+      upcoming.push({ index: sentence.index, text: sentence.text });
+    }
+  }
+  upcoming.sort((a, b) => a.index - b.index);
+  return upcoming;
+}
+
 async function forwardToWidget(type, payload) {
   const widget = await getWidget();
+  if (type === MSG.PLAYBACK_STATE && payload) {
+    // Build a new object rather than mutating the incoming payload -- it's
+    // the same object env.payload handed to this call, and other callers
+    // further down onRuntimeMessage's switch (or a future one) must not see
+    // an `upcoming` field they didn't ask for grafted onto their reference.
+    const upcoming = computeUpcomingSentences(payload.index ?? -1);
+    widget?.onMessage?.(type, { ...payload, upcoming });
+    return;
+  }
   widget?.onMessage?.(type, payload);
 }
 

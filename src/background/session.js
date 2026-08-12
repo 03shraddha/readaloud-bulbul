@@ -242,6 +242,13 @@ class Session {
   handleControlPlay() {
     if (this.status === 'stopped' || this.status === 'error' || this.destroyed) return;
 
+    // If a REQUEST_MORE_UNITS was left outstanding with its stall timer
+    // deferred (fired while paused; see PrefetchQueue._armStallTimer()),
+    // resuming is exactly the moment to give it a fresh 15s window -- so a
+    // still-never-arriving response can eventually end the session instead
+    // of hanging forever now that playback is live again.
+    this.prefetchQueue.rearmStallTimerIfAwaiting();
+
     // First-ever Play: markReady() already started prefetching but audio
     // may genuinely still be in flight, so show 'buffering' rather than
     // claim 'playing' early. A later resume-from-pause was already flowing
@@ -661,6 +668,15 @@ async function recoverSessionForTab(tabId) {
   // play again) or the existing CONTENT_READY -> RESUME_AVAILABLE prompt
   // from silently no-op'ing against a null `current`.
   recovered.status = 'paused';
+
+  // Restart the fetch pipeline, same effect as markReady() has for a
+  // freshly-extracted session -- otherwise PrefetchQueue.stopped stays true
+  // (its constructor default) forever and a later Play just sends AUDIO_PLAY
+  // to an offscreen document with nothing queued, stuck in 'buffering' for
+  // good. Unlike markReady(), this must NOT re-send SESSION_STARTED or touch
+  // `status`: the recovered session already has its identity from the
+  // snapshot, and playback must still wait for an explicit Play press.
+  recovered.prefetchQueue.start(recovered.cursor);
 
   current = recovered;
   log.info('recovered session from snapshot after service-worker restart', {
