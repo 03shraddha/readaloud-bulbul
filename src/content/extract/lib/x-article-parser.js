@@ -39,6 +39,62 @@ import { extractSentencesWithLocators, resolveLocatorToRange } from './range-map
 import { SELECTORS, querySelector } from './x-selectors.js';
 import { scrollIntoViewSmart } from './scroll.js';
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+const STABLE_POLL_INTERVAL_MS = 150;
+const STABLE_REQUIRED_QUIET_MS = 400;
+const STABLE_MAX_WAIT_MS = 3000;
+
+/**
+ * A cheap signature that changes if EITHER the article's rich-text content
+ * mutates (X still hydrating the body in) OR the page's overall height
+ * shifts (an image finishing loading, pushing later content down/up).
+ * @param {Element} readView
+ * @returns {string}
+ */
+function articleSignature(readView) {
+  const richTextEl = querySelector(readView, SELECTORS.articleRichText) || readView;
+  return `${Math.round(document.documentElement.scrollHeight)}:${richTextEl.textContent.length}`;
+}
+
+/**
+ * On a fresh page load, X streams the Article's body in via GraphQL and the
+ * DOM is still hydrating (and images are still loading, shifting page
+ * height) for a moment after `articleReadView` first appears. Extracting
+ * right then captures locators against nodes/layout that are about to
+ * change -- the read position resolves against stale content until it
+ * "catches up" a step or two later, which looks like a highlight/scroll
+ * that's briefly wrong and then self-corrects. Waiting here, once, before
+ * the real extraction, for the article to stop changing avoids ever
+ * capturing that half-settled state. Bounded so a page that never fully
+ * quiets down (e.g. a live-updating widget elsewhere) can't hang startup.
+ * @returns {Promise<void>}
+ */
+export async function waitForArticleStable() {
+  const readView = querySelector(document, SELECTORS.articleReadView);
+  if (!readView) return;
+
+  const deadline = Date.now() + STABLE_MAX_WAIT_MS;
+  let lastSignature = articleSignature(readView);
+  let quietSince = Date.now();
+
+  while (Date.now() < deadline) {
+    await sleep(STABLE_POLL_INTERVAL_MS);
+    const stillThere = querySelector(document, SELECTORS.articleReadView);
+    if (!stillThere) return; // navigated away mid-wait
+
+    const signature = articleSignature(stillThere);
+    if (signature !== lastSignature) {
+      lastSignature = signature;
+      quietSince = Date.now();
+      continue;
+    }
+    if (Date.now() - quietSince >= STABLE_REQUIRED_QUIET_MS) return;
+  }
+}
+
 /**
  * @param {Location} location
  * @returns {string|null}

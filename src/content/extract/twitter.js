@@ -31,7 +31,12 @@ import { SELECTORS, querySelector, queryAll } from './lib/x-selectors.js';
 import { extractStatusId } from './lib/x-tweet-parser.js';
 import { groupTweetsIntoUnits } from './lib/x-thread-grouper.js';
 import { createTimelineFeeder } from './lib/x-timeline-feeder.js';
-import { extractArticleUnits, resolveArticleAnchor, ensureArticleVisible } from './lib/x-article-parser.js';
+import {
+  extractArticleUnits,
+  resolveArticleAnchor,
+  ensureArticleVisible,
+  waitForArticleStable,
+} from './lib/x-article-parser.js';
 import { scrollIntoViewSmart } from './lib/scroll.js';
 
 const HOST_RE = /(^|\.)(x|twitter)\.com$/i;
@@ -101,6 +106,15 @@ async function extract() {
   // when present, it's the real content -- the underlying tweetData for
   // that same status is a near-empty stub (no tweetText at all), so drop it
   // in favor of the article's own units rather than reading both.
+  //
+  // On a just-reloaded page the Article body is often still hydrating (and
+  // images still loading) right when this runs -- wait for it to settle
+  // first, or the locators/scroll targets we capture below would point at
+  // a half-finished layout that visibly shifts under the reader a moment
+  // later (see waitForArticleStable() doc comment).
+  if (querySelector(document, SELECTORS.articleReadView)) {
+    await waitForArticleStable();
+  }
   const article = extractArticleUnits({ languageCode: state.settings.languageCode || 'en-IN' });
   if (article) {
     units = units.filter(
