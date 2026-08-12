@@ -255,9 +255,29 @@ class Session {
     }
     this.emitPlaybackState();
 
-    offscreenManager.ensureOffscreenReady(this.sessionId, this.rate, this.cursor).then(() => {
-      offscreenManager.sendToOffscreen(makeEnvelope(MSG.AUDIO_PLAY, TARGET.OFFSCREEN, this.sessionId, {}));
-    });
+    offscreenManager
+      .ensureOffscreenReady(this.sessionId, this.rate, this.cursor)
+      .then(() => {
+        offscreenManager.sendToOffscreen(makeEnvelope(MSG.AUDIO_PLAY, TARGET.OFFSCREEN, this.sessionId, {}));
+      })
+      .catch((err) => {
+        // Without this, a failed offscreen-document handshake (rare, but
+        // e.g. a stale document Chrome refuses to recreate) left AUDIO_PLAY
+        // never sent at all -- status stuck on 'buffering' forever, no
+        // error surfaced anywhere, indistinguishable from "Play does
+        // nothing". Recover to 'paused' so the button is honest and another
+        // press can retry, and tell the user something actually went wrong.
+        log.error('failed to start offscreen playback', err);
+        if (this.destroyed) return;
+        this.status = 'paused';
+        this.emitPlaybackState();
+        this.sendToTab(
+          makeEnvelope(MSG.TOAST, TARGET.CONTENT, this.sessionId, {
+            level: 'error',
+            message: 'Could not start audio playback. Try Play again.',
+          })
+        );
+      });
 
     persistence.scheduleProgressSave(this);
   }
