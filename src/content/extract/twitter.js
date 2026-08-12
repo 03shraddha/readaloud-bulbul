@@ -128,7 +128,19 @@ async function extract() {
     contentKey: twitterContentKey(location),
     contentHash: computeContentHash(units),
     title: article?.title || document.title,
-    exhausted: false,
+    // `exhausted: false` was hardcoded here unconditionally -- correct for
+    // an ordinary timeline (there's always more to scroll to), but wrong
+    // for an Article: extractArticleUnits() above already walked the whole
+    // body in one synchronous DOM pass (no scrolling involved), so there is
+    // nothing left to fetch. Leaving this false meant that as soon as the
+    // prefetch buffer ran low (immediately, if the article had fewer
+    // sentences than PREFETCH_AHEAD, or later, near the end of any
+    // article), the background would ask for "more units", which the
+    // feeder below has no concept of an Article and would answer by
+    // blindly scrolling the page down hunting for `article[data-testid=
+    // "tweet"]` elements that were never going to be there -- exactly the
+    // unwanted downward auto-scroll reported after clicking play.
+    exhausted: !!article,
   };
 }
 
@@ -137,6 +149,21 @@ async function extract() {
  * @returns {Promise<import('../../shared/types.js').ExtractResult>}
  */
 async function extractMore(reason) {
+  // Belt-and-suspenders: extract()'s `exhausted: !!article` already stops
+  // the background from ever calling this for an Article session, but if
+  // that ever changes (a future resumed session, a code path we missed),
+  // never let the tweet-timeline feeder's scroll-hunt run against an
+  // Article page -- there is nothing it could find there.
+  if (querySelector(document, SELECTORS.articleReadView)) {
+    return {
+      units: [],
+      contentKey: twitterContentKey(location),
+      contentHash: computeContentHash([]),
+      title: document.title,
+      exhausted: true,
+    };
+  }
+
   if (!state.feeder) {
     return {
       units: [],
