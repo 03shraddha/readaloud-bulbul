@@ -152,7 +152,7 @@ function buildImageBlockUnit(block, unitId, languageCode) {
         locator: { kind: 'element', element: img, articleView: true },
       },
     ],
-    meta: {},
+    meta: { isArticleView: true },
   };
 }
 
@@ -187,7 +187,7 @@ function buildTextBlockUnit(block, unitId, languageCode) {
   }
 
   if (!sentences.length) return null;
-  return { id: unitId, kind: 'paragraph', label: null, sentences, meta: {} };
+  return { id: unitId, kind: 'paragraph', label: null, sentences, meta: { isArticleView: true } };
 }
 
 /**
@@ -253,11 +253,22 @@ function buildTitleUnit(readView, statusId, languageCode) {
         // cover image), so centering it like a body sentence would
         // actively scroll DOWN to push it to mid-viewport -- a jarring,
         // unnecessary move right as reading starts. Anchor it to the top
-        // of the viewport instead.
-        locator: { kind: 'element', element: titleEl, articleView: true, scrollBlock: 'start' },
+        // of the viewport instead, and do it as an instant jump rather
+        // than a smooth-scroll animation: a multi-hundred-ms animated
+        // scroll gives the page's own late-loading content (a hero image,
+        // an ad below it) a window to shift layout mid-flight, which reads
+        // as the scroll overshooting and correcting itself. A single
+        // instant jump has no such window.
+        locator: {
+          kind: 'element',
+          element: titleEl,
+          articleView: true,
+          scrollBlock: 'start',
+          scrollBehavior: 'auto',
+        },
       },
     ],
-    meta: {},
+    meta: { isArticleView: true },
   };
 }
 
@@ -317,8 +328,11 @@ export function ensureArticleVisible(locator) {
   // No-ops when already comfortably on screen -- an Article body reads
   // through many short sentences per paragraph block; re-centering on every
   // one would visibly race ahead of the actual reading pace. See scroll.js.
-  // `scrollBlock` lets a specific locator (the title) override the default
-  // centering -- see buildTitleUnit()'s comment for why.
-  scrollIntoViewSmart(target, { behavior: 'smooth', block: locator.scrollBlock || 'center' });
+  // `scrollBlock`/`scrollBehavior` let a specific locator (the title)
+  // override the defaults -- see buildTitleUnit()'s comment for why.
+  scrollIntoViewSmart(target, {
+    behavior: locator.scrollBehavior || 'smooth',
+    block: locator.scrollBlock || 'center',
+  });
   return true;
 }

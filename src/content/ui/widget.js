@@ -10,10 +10,9 @@
  * (#SHADOW_ROOT_ID) at WIDGET_Z_INDEX, is draggable by its header (pointer
  * events, position clamped to the viewport, position:fixed so it survives
  * scrolling, re-anchored on resize), and exposes play/pause, prev/next
- * sentence, a speed selector over RATES, stop, a circular sentence-progress
- * ring, a sentence text preview (doubling as the §10 unmounted-tweet
- * fallback surface), and a settings popover for autoScroll / skipPromoted /
- * announceRetweets.
+ * sentence, a speed selector over RATES, stop, a sentence text preview
+ * (doubling as the §10 unmounted-tweet fallback surface), and a settings
+ * popover for autoScroll / skipPromoted / announceRetweets.
  *
  * Every control calls `onControl(controlType, payload)` with the exact
  * CONTROL_* shape from shared_contracts §3 — the caller (content/main.js) is
@@ -35,20 +34,13 @@
  */
 
 import { MSG, TARGET, makeEnvelope, safeSendRuntimeMessage } from '../../shared/messages.js';
-import { SHADOW_ROOT_ID, WIDGET_Z_INDEX, RATES, GRADIENT_FROM, GRADIENT_TO } from '../../shared/constants.js';
+import { SHADOW_ROOT_ID, WIDGET_Z_INDEX, RATES } from '../../shared/constants.js';
 import { getWidgetStyles, getResumeBannerStyles } from './widget-styles.js';
 import { ICONS } from './icons.js';
 
 const DEFAULT_MARGIN_PX = 20;
 const TOAST_TTL_MS = 4200;
 const MAX_TOASTS = 3;
-
-// Circular sentence-progress ring (replaces the old linear progress bar) —
-// see buildMarkup()'s `.boyle-progress-ring-*` SVG and updateProgress()
-// below. Radius/circumference are derived once here so the SVG markup and
-// the stroke-dashoffset math in updateProgress() can't drift apart.
-const RING_RADIUS = 20;
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 /** Shadow-DOM host id for the resume banner — deliberately distinct from
  * SHADOW_ROOT_ID (the full widget's), since the two are separate mount
@@ -107,40 +99,6 @@ function buildMarkup() {
     <span class="boyle-status-pill" data-role="status-pill">idle</span>
   </div>
   <div class="boyle-preview" data-role="preview"></div>
-  <div class="boyle-progress-row">
-    <div class="boyle-progress-ring-wrap">
-      <svg class="boyle-progress-ring" viewBox="0 0 48 48" width="48" height="48" aria-hidden="true" focusable="false">
-        <defs>
-          <!-- gradientTransform cancels the -90deg CSS rotation that
-               .boyle-progress-ring applies to this whole <svg> (see
-               widget-styles.js). That rotation turns the ring's start point
-               into 12 o'clock, but it rotates the painted gradient with it,
-               which would leave GRADIENT_FROM at the bottom-left and
-               GRADIENT_TO at the top-right — the mirror image of the
-               linear-gradient(135deg, from, to) used by the play button
-               and the toggle switches. Rotating the gradient +90deg about
-               the bounding-box centre nets out to zero, so on screen the
-               ring reads blue (top-left) -> orange (bottom-right) like every
-               other gradient in the widget. -->
-          <linearGradient id="boyle-ring-gradient" x1="0%" y1="0%" x2="100%" y2="100%" gradientTransform="rotate(90 0.5 0.5)">
-            <stop offset="0%" stop-color="${GRADIENT_FROM}" />
-            <stop offset="100%" stop-color="${GRADIENT_TO}" />
-          </linearGradient>
-        </defs>
-        <circle class="boyle-progress-ring-track" cx="24" cy="24" r="${RING_RADIUS}"></circle>
-        <circle
-          class="boyle-progress-ring-fill"
-          data-role="progress-ring-fill"
-          cx="24"
-          cy="24"
-          r="${RING_RADIUS}"
-          stroke-dasharray="${RING_CIRCUMFERENCE} ${RING_CIRCUMFERENCE}"
-          stroke-dashoffset="${RING_CIRCUMFERENCE}"
-        ></circle>
-      </svg>
-      <span class="boyle-progress-ring-text" data-role="progress-text">— / —</span>
-    </div>
-  </div>
   <div class="boyle-controls">
     <button type="button" class="boyle-icon-btn" data-action="prev" title="Previous sentence" aria-label="Previous sentence">${ICONS.previous}</button>
     <button type="button" class="boyle-icon-btn boyle-play-btn" data-action="toggle" title="Play / pause" aria-label="Play or pause">${ICONS.play}</button>
@@ -248,14 +206,6 @@ export function createWidget({ onControl } = {}) {
     refs.preview.classList.toggle('boyle-preview--fallback', isFallback);
   }
 
-  function updateProgress() {
-    const total = lastState?.totalSentences || 0;
-    const idx = lastState?.index ?? -1;
-    const fraction = total > 0 && idx >= 0 ? Math.min(1, (idx + 1) / total) : 0;
-    refs.progressRingFill.style.strokeDashoffset = `${RING_CIRCUMFERENCE * (1 - fraction)}`;
-    refs.progressText.textContent = total > 0 && idx >= 0 ? `${idx + 1} / ${total}` : '— / —';
-  }
-
   function updateControls() {
     const state = lastState;
     const hasSession = !!state.sessionId && state.index >= 0;
@@ -289,7 +239,6 @@ export function createWidget({ onControl } = {}) {
     lastState = { ...defaultPlaybackState(), ...state };
     if (!hostEl) return; // not mounted yet; state is retained for the next mount()
     updatePreview();
-    updateProgress();
     updateControls();
     maybeToastError(lastState);
   }
@@ -430,8 +379,6 @@ export function createWidget({ onControl } = {}) {
       unitLabel: byRole('unit-label'),
       statusPill: byRole('status-pill'),
       preview: byRole('preview'),
-      progressRingFill: byRole('progress-ring-fill'),
-      progressText: byRole('progress-text'),
       prevBtn: container.querySelector('[data-action="prev"]'),
       playBtn: container.querySelector('[data-action="toggle"]'),
       nextBtn: container.querySelector('[data-action="next"]'),

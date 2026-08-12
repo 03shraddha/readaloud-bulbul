@@ -159,6 +159,22 @@ async function handleActivate() {
     });
 
     const result = await activeExtractor.extract();
+
+    // Position the page at the very first sentence right now, rather than
+    // waiting for the first HIGHLIGHT_SENTENCE round-trip -- that depends on
+    // TTS synthesis finishing (a second or more of backend latency), during
+    // which the page could load further content and the eventual scroll
+    // would visibly race to catch up. Doing it here means there's exactly
+    // one deliberate scroll at session start, immediately.
+    const firstSentence = result.units[0]?.sentences[0] ?? null;
+    if (firstSentence) {
+      try {
+        await activeExtractor.ensureVisible(firstSentence);
+      } catch (err) {
+        log.warn('initial ensureVisible failed', err);
+      }
+    }
+
     const units = assignIndicesAndStrip(result.units);
     const startIndex = units[0]?.sentences[0]?.index ?? 0;
 

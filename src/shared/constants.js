@@ -56,7 +56,7 @@ export const SUPPORTED_LANGUAGES = [
   'ta-IN',
   'te-IN',
 ];
-export const DEFAULT_SPEAKER = 'simran';
+export const DEFAULT_SPEAKER = 'shubh';
 
 // --- X / Twitter autoscroll pacing ---
 export const X_AUTOSCROLL_STEP_PX = 600;

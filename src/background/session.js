@@ -176,6 +176,18 @@ class Session {
     }
 
     if (this.kind === 'twitter') {
+      const firstUnitMeta = this.sentences[0] ? this.unitMeta.get(this.sentences[0].unitId) : null;
+      if (firstUnitMeta?.meta?.isArticleView) {
+        // X's long-form Article view has no reliable per-sentence resume
+        // anchor (its title/body units carry no tweet statusId at all) --
+        // and jumping the cursor to wherever a stale lastStatusId happens
+        // to match among the regular tweets/replies below the article is
+        // actively wrong, not just imprecise: it skips the article outright
+        // and yanks the page down to an unrelated tweet. Always start a
+        // fresh Article read at the top instead of guessing.
+        return;
+      }
+
       this.lastStatusId = record.lastStatusId || null;
       this.readStatusIds = Array.isArray(record.readStatusIds) ? record.readStatusIds.slice(-MAX_READ_STATUS_IDS) : [];
 

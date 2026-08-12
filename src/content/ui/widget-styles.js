@@ -3,10 +3,9 @@
  *
  * CSS injected into the widget's own Shadow DOM root (#boyle-root, see
  * SHADOW_ROOT_ID). Fully self-contained visual identity: blue -> orange
- * gradient (GRADIENT_FROM/GRADIENT_TO) for the circular progress ring and
- * active accents, no external fonts/assets, respects prefers-color-scheme
- * and prefers-reduced-motion. No Sarvam name/logo/wordmark/monogram
- * anywhere.
+ * gradient (GRADIENT_FROM/GRADIENT_TO) for the play button and active
+ * accents, no external fonts/assets, respects prefers-color-scheme and
+ * prefers-reduced-motion. No Sarvam name/logo/wordmark/monogram anywhere.
  *
  * Also exports `getResumeBannerStyles()` for the small standalone
  * "Resume reading?" banner (its own Shadow DOM root, separate from the full
@@ -206,53 +205,6 @@ ${HOST_VARIABLES_DARK_CSS}  }
   color: var(--boyle-text-muted);
 }
 
-/* ---- Progress ring ---- */
-.boyle-progress-row {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 10px;
-}
-
-.boyle-progress-ring-wrap {
-  position: relative;
-  width: 48px;
-  height: 48px;
-  flex: 0 0 auto;
-}
-
-.boyle-progress-ring {
-  position: absolute;
-  inset: 0;
-  transform: rotate(-90deg);
-}
-
-.boyle-progress-ring-track {
-  fill: none;
-  stroke: var(--boyle-border);
-  stroke-width: 4;
-}
-
-.boyle-progress-ring-fill {
-  fill: none;
-  stroke: url(#boyle-ring-gradient);
-  stroke-width: 4;
-  stroke-linecap: round;
-  transition: stroke-dashoffset 160ms ease-out;
-}
-
-.boyle-progress-ring-text {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 8.5px;
-  font-weight: 700;
-  color: var(--boyle-text-muted);
-  white-space: nowrap;
-  pointer-events: none;
-}
-
 /* ---- Controls ---- */
 .boyle-controls {
   display: flex;
@@ -439,7 +391,6 @@ ${HOST_VARIABLES_DARK_CSS}  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .boyle-progress-ring-fill,
   .boyle-switch,
   .boyle-switch::after,
   .boyle-toast {
