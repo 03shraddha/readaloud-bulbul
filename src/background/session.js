@@ -92,10 +92,11 @@ class Session {
     this.totalSentences = 0;
     this.error = null;
     this.destroyed = false;
-    /** Whether beginPlayback() has ever run -- guards the first Play click
-     * doing real startup (prefetch + offscreen) vs. a later one just
-     * resuming audio. See markReady()/handleControlPlay(). */
-    this.playbackStarted = false;
+    /** Whether handleControlPlay() has ever run -- lets the very first Play
+     * show 'buffering' (audio may genuinely still be in flight) while a
+     * later resume-from-pause shows 'playing' immediately (it was already
+     * flowing before the pause). See handleControlPlay(). */
+    this.everPlayed = false;
 
     /** @type {Map<number, number|null>} index -> durationHintMs, cleared once consumed */
     this.durationHints = new Map();
@@ -207,27 +208,24 @@ class Session {
   }
 
   /**
-   * Extraction is done and the session is ready, but nothing plays until
-   * the user actually presses Play (handleControlPlay) -- activating the
-   * extension should never start audio on its own.
+   * Extraction is done and the session is ready, but nothing AUDIBLE
+   * happens until the user actually presses Play (handleControlPlay) --
+   * activating the extension should never start audio on its own.
+   *
+   * Synthesis DOES start now, though, silently: fetching/queuing audio
+   * makes no sound by itself (the offscreen AudioQueue only actually plays
+   * once handleControlPlay's AUDIO_PLAY sets its wantsPlay flag), and
+   * warming the pipeline now -- while the widget just sits there paused,
+   * waiting on the user -- means the first sentence's audio is usually
+   * already in hand by the time Play is pressed, instead of that whole
+   * network round-trip happening visibly after the click.
    */
   markReady() {
     if (this.status === 'stopped' || this.destroyed) return;
     this.status = 'paused';
     this.emitPlaybackState();
-  }
-
-  /** Kick off prefetching + audio playback for the current cursor. */
-  beginPlayback() {
-    this.status = 'buffering';
-    this.emitPlaybackState();
 
     this.prefetchQueue.start(this.cursor);
-    offscreenManager.ensureOffscreenReady(this.sessionId, this.rate, this.cursor).then(() => {
-      offscreenManager.sendToOffscreen(makeEnvelope(MSG.AUDIO_PLAY, TARGET.OFFSCREEN, this.sessionId, {}));
-    });
-
-    persistence.scheduleProgressSave(this);
   }
 
   /**
@@ -244,18 +242,24 @@ class Session {
   handleControlPlay() {
     if (this.status === 'stopped' || this.status === 'error' || this.destroyed) return;
 
-    // First-ever Play for this session: nothing has been prefetched or
-    // handed to the offscreen document yet (markReady() deliberately
-    // skipped that) -- do the real startup now instead of just resuming.
-    if (!this.playbackStarted) {
-      this.playbackStarted = true;
-      this.beginPlayback();
-      return;
+    // First-ever Play: markReady() already started prefetching but audio
+    // may genuinely still be in flight, so show 'buffering' rather than
+    // claim 'playing' early. A later resume-from-pause was already flowing
+    // before the pause, so it can go straight to 'playing' (unless a
+    // buffer-low re-fetch is already in progress -- don't clobber that).
+    if (!this.everPlayed) {
+      this.everPlayed = true;
+      this.status = 'buffering';
+    } else if (this.status !== 'buffering') {
+      this.status = 'playing';
     }
-
-    offscreenManager.sendToOffscreen(makeEnvelope(MSG.AUDIO_PLAY, TARGET.OFFSCREEN, this.sessionId, {}));
-    if (this.status !== 'buffering') this.status = 'playing';
     this.emitPlaybackState();
+
+    offscreenManager.ensureOffscreenReady(this.sessionId, this.rate, this.cursor).then(() => {
+      offscreenManager.sendToOffscreen(makeEnvelope(MSG.AUDIO_PLAY, TARGET.OFFSCREEN, this.sessionId, {}));
+    });
+
+    persistence.scheduleProgressSave(this);
   }
 
   handleControlPause() {

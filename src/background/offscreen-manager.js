@@ -140,8 +140,8 @@ async function createDocumentIfNeeded() {
  */
 export async function ensureOffscreenReady(sessionId, rate, startIndex) {
   // Session start fires several concurrent calls (one per in-flight prefetch
-  // plus one from beginPlayback). Without this single-flight guard each one
-  // would independently observe "no document yet" and send its own
+  // plus one from handleControlPlay). Without this single-flight guard each
+  // one would independently observe "no document yet" and send its own
   // OFFSCREEN_INIT — and every OFFSCREEN_INIT resets the AudioQueue
   // (clearing the queue and wantsPlay), which can silently kill playback
   // right after it starts.
