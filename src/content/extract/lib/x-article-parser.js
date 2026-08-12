@@ -231,16 +231,18 @@ export function extractArticleUnits({ languageCode = 'en-IN' } = {}) {
 
 /**
  * @param {object} locator - a sentence.locator with `articleView: true`
+ * @param {string} [expectedText] - the sentence's own text, so a
+ *   drifted index-path re-resolution can be caught (see range-mapper.js).
  * @returns {{kind:'range', range: Range}|{kind:'element', element: Element}|null}
  */
-export function resolveArticleAnchor(locator) {
+export function resolveArticleAnchor(locator, expectedText) {
   if (!locator) return null;
 
   if (locator.kind === 'element') {
     return locator.element && locator.element.isConnected ? { kind: 'element', element: locator.element } : null;
   }
 
-  const range = resolveLocatorToRange(locator);
+  const range = resolveLocatorToRange(locator, expectedText);
   return range ? { kind: 'range', range } : null;
 }
 

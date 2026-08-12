@@ -206,7 +206,7 @@ function findRangeForFingerprint(containerEl, fingerprint) {
 async function resolveAnchor(sentence) {
   const locator = sentence?.locator;
   if (!locator) return null;
-  if (locator.articleView) return resolveArticleAnchor(locator);
+  if (locator.articleView) return resolveArticleAnchor(locator, sentence.text);
   if (locator.part === 'thread-cue') return null; // synthetic — no DOM node represents it
 
   const article = findArticleByStatusId(locator.statusId);

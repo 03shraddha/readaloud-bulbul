@@ -350,7 +350,7 @@ const articleExtractor = {
         return element ? { kind: 'element', element } : null;
       }
 
-      const range = resolveLocatorToRange(locator);
+      const range = resolveLocatorToRange(locator, sentence.text);
       return range ? { kind: 'range', range } : null;
     } catch (err) {
       log.error('resolveAnchor failed', err);

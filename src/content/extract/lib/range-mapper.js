@@ -416,14 +416,98 @@ export function extractSentencesWithLocators(container, options = {}) {
 }
 
 /**
+ * @param {string} s
+ * @returns {string}
+ */
+function normalizeForCompare(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/**
+ * Loose content check, NOT an exact-string check: `range.toString()` is raw
+ * DOM text, while `expectedText` went through normalizeForSpeech (URLs
+ * stripped, ellipses collapsed, whitespace collapsed, etc.) at extraction
+ * time, so the two will rarely match character-for-character even when the
+ * range is perfectly correct. This only needs to catch the failure mode
+ * `resolveLocatorToRange` re-resolves for: an index-path re-resolution
+ * landing on a COMPLETELY DIFFERENT sentence because the tree shape shifted
+ * (a sibling inserted/removed) between extraction and highlight time.
+ * @param {Range} range
+ * @param {string} expectedText
+ * @returns {boolean}
+ */
+function rangeRoughlyMatchesText(range, expectedText) {
+  const expected = normalizeForCompare(expectedText);
+  if (!expected) return true; // nothing meaningful to compare against
+  const actual = normalizeForCompare(range.toString());
+  if (!actual) return false;
+  const prefixLen = Math.min(20, expected.length);
+  const expectedPrefix = expected.slice(0, prefixLen);
+  return actual.startsWith(expectedPrefix) || actual.includes(expectedPrefix);
+}
+
+/**
+ * Freshly locate `text` inside `container`'s CURRENT live DOM (no stale
+ * indices/offsets involved at all) -- the fallback for when index-path
+ * re-resolution lands on the wrong node. Reuses the same raw-text-map +
+ * normalize-with-map pipeline `extractSentencesWithLocators` uses, just for
+ * one already-known sentence instead of splitting fresh ones.
+ * @param {Node} container
+ * @param {string} text
+ * @returns {Range|null}
+ */
+function findRangeByText(container, text) {
+  if (!container || !text) return null;
+
+  try {
+    const { raw, rawMap } = buildRawTextAndMap(container);
+    if (!raw || !raw.trim()) return null;
+
+    const realNormalizedText = normalizeForSpeech(raw);
+    if (!realNormalizedText || !realNormalizedText.includes(text)) return null;
+
+    const mirrored = normalizeWithMap(raw, rawMap);
+    const normalizedMap =
+      mirrored.text === realNormalizedText
+        ? mirrored.map
+        : (() => {
+            const clamped = mirrored.map.slice(0, realNormalizedText.length);
+            while (clamped.length < realNormalizedText.length) clamped.push(clamped[clamped.length - 1] ?? null);
+            return clamped;
+          })();
+
+    const idx = realNormalizedText.indexOf(text);
+    const locator = buildLocatorFromOffset(container, normalizedMap, idx, idx + text.length);
+    if (!locator) return null;
+
+    const range = locator.startNode.ownerDocument.createRange();
+    range.setStart(locator.startNode, Math.max(0, locator.startOffset));
+    range.setEnd(locator.endNode, Math.max(0, locator.endOffset));
+    return range;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Rebuild a live Range from a locator produced by
  * `extractSentencesWithLocators`. Verifies the recorded nodes are still
  * connected; if not, re-resolves them from the container by index path.
+ *
+ * That index-path re-resolution is itself fragile: if a framework
+ * re-render inserted or removed even one sibling anywhere between the
+ * container and the target node, the SAME indices now point at a
+ * DIFFERENT node -- silently, with no error, potentially landing on a
+ * completely unrelated part of the page. When `expectedText` is supplied,
+ * the re-resolved range is checked against it and, on a mismatch, a fresh
+ * content-based search (`findRangeByText`) is tried before giving up.
  * Returns null if the content is genuinely gone.
  * @param {object|null} locator
+ * @param {string} [expectedText] - the sentence's own text, for verifying a
+ *   path-based re-resolution actually landed on the right content.
  * @returns {Range|null}
  */
-export function resolveLocatorToRange(locator) {
+export function resolveLocatorToRange(locator, expectedText) {
   if (!locator) return null;
 
   try {
@@ -431,6 +515,7 @@ export function resolveLocatorToRange(locator) {
 
     const startOk = startNode && startNode.isConnected;
     const endOk = endNode && endNode.isConnected;
+    let rePathed = false;
 
     if (!startOk || !endOk) {
       if (!containerRef || !containerRef.isConnected || !Array.isArray(nodePath)) return null;
@@ -443,6 +528,7 @@ export function resolveLocatorToRange(locator) {
       endNode = resolvedEnd;
       startOffset = Math.min(startOffset, (startNode.nodeValue || '').length);
       endOffset = Math.min(endOffset, (endNode.nodeValue || '').length);
+      rePathed = true;
     }
 
     if (!startNode.ownerDocument || startNode.ownerDocument !== endNode.ownerDocument) {
@@ -454,6 +540,12 @@ export function resolveLocatorToRange(locator) {
     const range = startNode.ownerDocument.createRange();
     range.setStart(startNode, Math.max(0, startOffset));
     range.setEnd(endNode, Math.max(0, endOffset));
+
+    if (rePathed && expectedText && !rangeRoughlyMatchesText(range, expectedText)) {
+      const fallback = containerRef && containerRef.isConnected ? findRangeByText(containerRef, expectedText) : null;
+      return fallback || null;
+    }
+
     return range;
   } catch {
     return null;
