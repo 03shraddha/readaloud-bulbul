@@ -15,7 +15,24 @@
 
 import { isElementVisible } from './visibility.js';
 
-const CODE_CLASS_RE = /\b(highlight|codehilite|hljs|prettyprint|language-\w+|syntax(?:-highlight(?:er)?)?)\b/i;
+// Class names that mean "this is a code block" ONLY as an exact, standalone
+// class token -- Jekyll/Rouge (`highlight`), Python-Markdown (`codehilite`),
+// highlight.js (`hljs`), and Google Code Prettify (`prettyprint`) all apply
+// these bare, with no suffix. A previous version of this matched `highlight`
+// as a substring anywhere in the class attribute, which also matched CSS-
+// module-hashed classes unrelated apps generate for entirely different UI
+// (e.g. Substack's own like-button chrome ships a class like
+// `highlight-U002IP` for a hover effect, nothing to do with code) -- that
+// false-positive made the whole page's real content get replaced with a
+// single "code block, 1 line, skipped" summary, i.e. reading Substack posts
+// didn't work at all.
+const EXACT_CODE_CLASSES = new Set(['highlight', 'codehilite', 'hljs', 'prettyprint']);
+// Conventions that ARE legitimately prefix-based: Jekyll's newer output pairs
+// `highlighter-rouge` with a `language-xxx` class; Prism.js/highlight.js use
+// `language-xxx` on the code element itself; some themes use
+// `syntax-highlight(er)` as a compound prefix. Anchored at the start of the
+// token (not `\b` mid-string) so an unrelated hash suffix can't satisfy it.
+const CODE_CLASS_PREFIX_RE = /^(highlighter-|language-\w|syntax-highlight)/i;
 
 /**
  * @param {Element} el
@@ -27,9 +44,15 @@ export function isCodeBlock(el) {
   if (el.tagName === 'PRE') return true;
 
   const className = typeof el.className === 'string' ? el.className : '';
-  if (className && CODE_CLASS_RE.test(className)) return true;
+  if (!className) return false;
 
-  return false;
+  return className
+    .trim()
+    .split(/\s+/)
+    .some((token) => {
+      const t = token.toLowerCase();
+      return EXACT_CODE_CLASSES.has(t) || CODE_CLASS_PREFIX_RE.test(t);
+    });
 }
 
 /**
