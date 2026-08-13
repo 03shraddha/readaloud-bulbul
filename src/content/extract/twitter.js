@@ -278,12 +278,6 @@ async function resolveAnchor(sentence) {
       const el = querySelector(article, SELECTORS.cardWrapper);
       return el ? { kind: 'element', element: el } : null;
     }
-    case 'image': {
-      // No per-image ordinal is tracked in the locator yet, so there is no
-      // reliable way to point at THIS specific image among possibly
-      // several -- degrade to the text-preview fallback rather than guess.
-      return null;
-    }
     case 'quote': {
       const nodes = queryAll(article, SELECTORS.tweetText);
       const quoteTextEl = nodes[1] || null;

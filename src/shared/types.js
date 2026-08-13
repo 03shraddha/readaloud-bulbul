@@ -31,7 +31,7 @@
  * A paragraph, heading, tweet, or grouped thread.
  * @typedef {Object} ReadUnit
  * @property {string} id - article: `u${n}`; X: `tw:${statusId}` or `thread:${firstStatusId}`
- * @property {'heading'|'paragraph'|'list-item'|'quote'|'caption'|'image-alt'|'code-summary'|'table-summary'|'tweet'|'thread'|'quote-tweet'|'poll'|'link-card'|'announcement'} kind
+ * @property {'heading'|'paragraph'|'list-item'|'quote'|'caption'|'code-summary'|'table-summary'|'tweet'|'thread'|'quote-tweet'|'poll'|'link-card'|'announcement'} kind
  * @property {string|null} label - spoken prefix, e.g. "Jane Doe shared this", "Next in thread"
  * @property {Sentence[]} sentences
  * @property {object} meta - extractor-specific, JSON-safe. X uses:

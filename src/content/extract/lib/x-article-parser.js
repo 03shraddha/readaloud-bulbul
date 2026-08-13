@@ -15,7 +15,8 @@
  *       ... n wrapper divs, each with exactly one child ...
  *         [data-testid="longformRichTextComponent"]
  *           (one div) > N sibling "blocks", each either:
- *             - a <section> containing an <img>, or
+ *             - a <section> containing an <img> (never read aloud -- see
+ *               article.js's classifyElement doc comment for why), or
  *             - a <div> whose text lives on a <span> leaf several levels
  *               down -- NOT a <p> tag, so article.js's tag-based
  *               `classifyElement()`/`buildUnits()` never recognizes these
@@ -25,15 +26,14 @@
  *               only the lower-level, tag-agnostic pieces: range-mapper.js's
  *               `extractSentencesWithLocators`/`resolveLocatorToRange` (the
  *               same DOM-range sentence anchoring the generic article
- *               extractor uses) and block-summarizer.js's `summarizeImage`.
+ *               extractor uses).
  *
  * Sentences produced here carry `locator.articleView = true` so twitter.js's
  * resolveAnchor()/ensureVisible() can tell them apart from ordinary
  * tweet-locator sentences (which have no such field) and route them here.
  */
 
-import { normalizeForSpeech, isPunctuationOnly } from '../../../shared/text/normalize.js';
-import { summarizeImage } from './block-summarizer.js';
+import { isPunctuationOnly } from '../../../shared/text/normalize.js';
 import { isElementVisible } from './visibility.js';
 import { extractSentencesWithLocators, resolveLocatorToRange } from './range-mapper.js';
 import { SELECTORS, querySelector } from './x-selectors.js';
@@ -129,39 +129,6 @@ function descendToBranchPoint(el) {
  * @param {string} languageCode
  * @returns {import('../../../shared/types.js').ReadUnit|null}
  */
-function buildImageBlockUnit(block, unitId, languageCode) {
-  const img = block.querySelector('img');
-  const summary = img ? summarizeImage(img) : null;
-  if (!summary) return null;
-
-  const text = normalizeForSpeech(summary);
-  if (!text || isPunctuationOnly(text)) return null;
-
-  return {
-    id: unitId,
-    kind: 'image-alt',
-    label: null,
-    sentences: [
-      {
-        id: `${unitId}::0`,
-        unitId,
-        index: -1,
-        text,
-        languageCode,
-        anchorKind: 'element',
-        locator: { kind: 'element', element: img, articleView: true },
-      },
-    ],
-    meta: { isArticleView: true },
-  };
-}
-
-/**
- * @param {Element} block
- * @param {string} unitId
- * @param {string} languageCode
- * @returns {import('../../../shared/types.js').ReadUnit|null}
- */
 function buildTextBlockUnit(block, unitId, languageCode) {
   let mapped = [];
   try {
@@ -213,9 +180,12 @@ function buildBodyUnits(richTextEl, statusId, languageCode) {
     if (!visible) continue;
 
     const unitId = `article:${statusId}:b${ordinal}`;
-    const unit = block.querySelector('img')
-      ? buildImageBlockUnit(block, unitId, languageCode)
-      : buildTextBlockUnit(block, unitId, languageCode);
+    // Images are deliberately never read (see article.js's classifyElement
+    // doc comment for why) -- an image-only block simply produces no
+    // sentences here (extractSentencesWithLocators finds no text nodes)
+    // and is silently skipped, while any real text sharing a block with an
+    // image is still picked up normally.
+    const unit = buildTextBlockUnit(block, unitId, languageCode);
 
     if (unit) {
       units.push(unit);

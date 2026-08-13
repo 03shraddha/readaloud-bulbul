@@ -66,9 +66,9 @@ function buildSentenceSpecs(tweetData, opts) {
     specs.push({ text: `${tweetData.linkCard.urlText}${title}.`, part: 'link-card' });
   }
 
-  for (const alt of tweetData.images || []) {
-    specs.push({ text: `Image described as: ${alt}.`, part: 'image' });
-  }
+  // Images are deliberately never read aloud (see article.js's
+  // classifyElement doc comment for why this applies across every site
+  // type, not just X) -- tweetData.images is left unused here on purpose.
 
   return specs;
 }

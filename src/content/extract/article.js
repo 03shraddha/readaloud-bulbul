@@ -22,7 +22,7 @@ import { createLogger } from '../../shared/logger.js';
 import { findBestContainer, shouldStripElement } from './lib/readability-lite.js';
 import { isElementVisible } from './lib/visibility.js';
 import { scrollIntoViewSmart } from './lib/scroll.js';
-import { isCodeBlock, isTable, summarizeCodeBlock, summarizeTable, summarizeImage } from './lib/block-summarizer.js';
+import { isCodeBlock, isTable, summarizeCodeBlock, summarizeTable } from './lib/block-summarizer.js';
 import { extractSentencesWithLocators, resolveLocatorToRange, resolveNodeFromPath } from './lib/range-mapper.js';
 import { walkDOM } from './lib/dom-walk.js';
 
@@ -88,7 +88,12 @@ function classifyElement(el) {
   if (tag === 'FIGCAPTION' || tag === 'CAPTION') return 'caption';
   if (isTable(el)) return 'table-summary';
   if (isCodeBlock(el)) return 'code-summary';
-  if (tag === 'IMG') return 'image-alt';
+  // Images are deliberately never classified/read -- announcing "image
+  // described as: ..." for every <img> got in the way of actually reading
+  // the page, across every site tested. A real <figcaption>/<caption>
+  // (handled above) still gets read on its own -- it's content the author
+  // actually wrote, unlike alt text, which is frequently absent, generic,
+  // or auto-generated.
 
   return null;
 }
@@ -174,18 +179,13 @@ function buildUnitForElement(el, kind, ordinal, languageCode) {
   if (kind === 'table-summary') {
     return buildSummaryUnit(unitId, kind, summarizeTable(el), el, languageCode);
   }
-  if (kind === 'image-alt') {
-    const summary = summarizeImage(el);
-    if (!summary) return null; // suppressed: figcaption already carries this text, or no alt at all
-    return buildSummaryUnit(unitId, kind, summary, el, languageCode);
-  }
 
   return buildTextUnit(unitId, kind, el, languageCode);
 }
 
 /**
  * Walk `container`'s classified descendants (heading/paragraph/list-item/
- * quote/caption/code-summary/table-summary/image-alt) in DOM order, never
+ * quote/caption/code-summary/table-summary) in DOM order, never
  * descending further once an element has been claimed as a unit (so a <p>
  * inside a <blockquote> doesn't also become its own separate paragraph).
  * @param {Element} container

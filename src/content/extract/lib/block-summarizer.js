@@ -2,18 +2,18 @@
  * src/content/extract/lib/block-summarizer.js
  *
  * Instead of reading code blocks and tables literally (which is unbearable
- * as speech), this module emits short spoken summaries for them, plus a
- * single spoken description for meaningfully-alt-texted images:
+ * as speech), this module emits short spoken summaries for them:
  *   - code block  -> "code block, 14 lines, skipped"
  *   - table       -> "table with 5 rows and 3 columns"
- *   - image       -> "image described as: <alt/aria-label text>"
- *     (suppressed entirely — returns null — when an adjacent visible
- *     <figcaption> already carries the same text, to avoid saying it twice)
+ *
+ * Images are handled separately: they're never summarized/read at all
+ * (across every extractor -- article.js, x-article-parser.js, and
+ * x-thread-grouper.js all skip them outright; see article.js's
+ * classifyElement doc comment for why), so there's no summarizeImage() here
+ * anymore.
  *
  * Pure functions only; nothing here mutates the DOM.
  */
-
-import { isElementVisible } from './visibility.js';
 
 // Class names that mean "this is a code block" ONLY as an exact, standalone
 // class token -- Jekyll/Rouge (`highlight`), Python-Markdown (`codehilite`),
@@ -101,48 +101,4 @@ export function summarizeTable(tableEl) {
   return `table with ${rowCount} row${rowCount === 1 ? '' : 's'} and ${colCount} column${colCount === 1 ? '' : 's'}`;
 }
 
-/**
- * @param {Element} el - typically the <img> itself
- * @returns {string|null} visible text of a sibling <figcaption> inside an
- *   enclosing <figure>, or null if there isn't one / it isn't visible.
- */
-function findAdjacentFigcaptionText(el) {
-  const figure = typeof el.closest === 'function' ? el.closest('figure') : null;
-  if (!figure) return null;
-
-  let figcaption = null;
-  try {
-    figcaption = figure.querySelector('figcaption');
-  } catch {
-    figcaption = null;
-  }
-  if (!figcaption || !isElementVisible(figcaption)) return null;
-
-  const text = (figcaption.textContent || '').trim();
-  return text || null;
-}
-
-/**
- * @param {Element} imgEl
- * @returns {string|null} the spoken "image described as: ..." unit text, or
- *   null when the image has no usable description, or when an adjacent
- *   visible <figcaption> already carries the same text (so a separate
- *   caption ReadUnit will speak it instead — no need to say it twice).
- */
-export function summarizeImage(imgEl) {
-  if (!imgEl) return null;
-
-  const alt = (imgEl.getAttribute && imgEl.getAttribute('alt')) || '';
-  const ariaLabel = (imgEl.getAttribute && imgEl.getAttribute('aria-label')) || '';
-  const description = alt.trim() || ariaLabel.trim();
-  if (!description) return null;
-
-  const captionText = findAdjacentFigcaptionText(imgEl);
-  if (captionText && captionText.toLowerCase() === description.toLowerCase()) {
-    return null;
-  }
-
-  return `image described as: ${description}`;
-}
-
-export default { isCodeBlock, isTable, summarizeCodeBlock, summarizeTable, summarizeImage };
+export default { isCodeBlock, isTable, summarizeCodeBlock, summarizeTable };
