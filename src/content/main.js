@@ -14,10 +14,7 @@
  *  - On HIGHLIGHT_SENTENCE: run the ensureVisible -> resolveAnchor ->
  *    highlighter/fallback sequence and reply HIGHLIGHT_RESULT.
  *  - Forward PLAYBACK_STATE / CLEAR_HIGHLIGHT / RESUME_AVAILABLE /
- *    SESSION_ENDED / TOAST to the widget. PLAYBACK_STATE additionally gets
- *    an `upcoming` field (a short locator-free window of the next few
- *    sentences from sentenceMap) attached for the widget's click-to-seek
- *    list -- see computeUpcomingSentences().
+ *    SESSION_ENDED / TOAST to the widget.
  *  - Forward widget control callbacks to the background as CONTROL_*.
  *  - Tear down on pagehide and on SPA URL change (X pushState); an SPA
  *    navigation also sends CONTROL_STOP so the background session actually
@@ -76,14 +73,6 @@ const sentenceMap = new Map();
 
 /** Monotonic cursor for Sentence.index, never reused within a session. */
 let nextSentenceIndex = 0;
-
-/**
- * How many sentences ahead of the current cursor to offer in the widget's
- * click-to-seek list (see computeUpcomingSentences() / forwardToWidget()).
- * Kept short deliberately -- a longer list reads as a dense, low-contrast
- * wall of text in the widget's small footprint rather than a quick picker.
- */
-const UPCOMING_WINDOW_SIZE = 5;
 
 /** @type {ReturnType<typeof import('./ui/widget.js')>|null} */
 let widgetModule = null;
@@ -358,37 +347,8 @@ async function handleClearHighlight(payload) {
   }
 }
 
-/**
- * A short, locator-free preview of the sentences just ahead of the current
- * cursor, for the widget's click-to-seek list. Scans sentenceMap the same
- * way assignIndicesAndStrip() builds its locator-free copies -- the
- * locator never leaves this file. The window starts strictly AFTER
- * fromIndex, so the sentence currently playing is never included.
- * @param {number} fromIndex - PlaybackState.index (may be -1 when idle)
- * @returns {Array<{index:number, text:string}>}
- */
-function computeUpcomingSentences(fromIndex) {
-  const upcoming = [];
-  for (const sentence of sentenceMap.values()) {
-    if (sentence.index > fromIndex && sentence.index <= fromIndex + UPCOMING_WINDOW_SIZE) {
-      upcoming.push({ index: sentence.index, text: sentence.text });
-    }
-  }
-  upcoming.sort((a, b) => a.index - b.index);
-  return upcoming;
-}
-
 async function forwardToWidget(type, payload) {
   const widget = await getWidget();
-  if (type === MSG.PLAYBACK_STATE && payload) {
-    // Build a new object rather than mutating the incoming payload -- it's
-    // the same object env.payload handed to this call, and other callers
-    // further down onRuntimeMessage's switch (or a future one) must not see
-    // an `upcoming` field they didn't ask for grafted onto their reference.
-    const upcoming = computeUpcomingSentences(payload.index ?? -1);
-    widget?.onMessage?.(type, { ...payload, upcoming });
-    return;
-  }
   widget?.onMessage?.(type, payload);
 }
 

@@ -11,11 +11,8 @@
  * events, position clamped to the viewport, position:fixed so it survives
  * scrolling, re-anchored on resize), and exposes play/pause, prev/next
  * sentence, a speed selector over RATES, stop, a sentence text preview
- * (doubling as the §10 unmounted-tweet fallback surface), a click-to-seek
- * list of upcoming sentences (rendered from PlaybackState's `upcoming`
- * field, which content/main.js attaches when forwarding PLAYBACK_STATE —
- * see its computeUpcomingSentences()), and a settings popover for
- * autoScroll / skipPromoted / announceRetweets.
+ * (doubling as the §10 unmounted-tweet fallback surface), and a settings
+ * popover for autoScroll / skipPromoted / announceRetweets.
  *
  * Every control calls `onControl(controlType, payload)` with the exact
  * CONTROL_* shape from shared_contracts §3 — the caller (content/main.js) is
@@ -44,87 +41,6 @@ import { ICONS } from './icons.js';
 const DEFAULT_MARGIN_PX = 20;
 const TOAST_TTL_MS = 4200;
 const MAX_TOASTS = 3;
-
-/**
- * CSS for the click-to-seek "upcoming sentences" list (see buildMarkup()'s
- * `.boyle-upcoming` block below). This task's file allowlist is main.js +
- * this file only, so these rules live here rather than in widget-styles.js
- * -- mount() appends this string onto the same shadow-root <style> element
- * as getWidgetStyles(), so it shares that module's --boyle-* variables and
- * follows the same boyle-* naming convention.
- */
-const UPCOMING_LIST_CSS = `
-.boyle-upcoming-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--boyle-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 4px;
-}
-
-.boyle-upcoming-label[hidden] {
-  display: none;
-}
-
-.boyle-upcoming {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-height: 6.6em;
-  overflow-y: auto;
-  margin-bottom: 10px;
-  border: 1px solid var(--boyle-border);
-  border-radius: 8px;
-  padding: 2px;
-}
-
-.boyle-upcoming[hidden] {
-  display: none;
-}
-
-.boyle-upcoming-row {
-  all: unset;
-  box-sizing: border-box;
-  display: block;
-  width: 100%;
-  /* Fixed single-line box height + overflow:hidden clips a second line
-     outright (belt-and-suspenders alongside the JS-side truncation in
-     updateUpcoming() -- text is truncated in JS to a safe length, so this
-     is a hard visual backstop, not the primary truncation mechanism). */
-  height: calc(1.4em + 10px);
-  padding: 5px 8px;
-  border-radius: 6px;
-  font-size: 12.5px;
-  line-height: 1.4;
-  color: var(--boyle-text);
-  opacity: 0.72;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.boyle-upcoming-row:not(:last-child) {
-  border-bottom: 1px solid var(--boyle-border);
-}
-
-.boyle-upcoming-row:hover {
-  background: var(--boyle-border);
-  opacity: 1;
-}
-
-.boyle-upcoming-row:focus-visible {
-  outline: 2px solid var(--boyle-grad-from);
-  outline-offset: 1px;
-}
-
-.boyle-upcoming-row--current {
-  color: var(--boyle-grad-from);
-  opacity: 1;
-  font-weight: 600;
-}
-`;
 
 /** Shadow-DOM host id for the resume banner — deliberately distinct from
  * SHADOW_ROOT_ID (the full widget's), since the two are separate mount
@@ -183,8 +99,6 @@ function buildMarkup() {
     <span class="boyle-status-pill" data-role="status-pill">idle</span>
   </div>
   <div class="boyle-preview" data-role="preview"></div>
-  <div class="boyle-upcoming-label" data-role="upcoming-label" hidden>Up next — click to jump</div>
-  <div class="boyle-upcoming" data-role="upcoming" hidden></div>
   <div class="boyle-controls">
     <button type="button" class="boyle-icon-btn" data-action="prev" title="Previous sentence" aria-label="Previous sentence">${ICONS.previous}</button>
     <button type="button" class="boyle-icon-btn boyle-play-btn" data-action="toggle" title="Play / pause" aria-label="Play or pause">${ICONS.play}</button>
@@ -292,43 +206,6 @@ export function createWidget({ onControl } = {}) {
     refs.preview.classList.toggle('boyle-preview--fallback', isFallback);
   }
 
-  /**
-   * Renders the click-to-seek list of upcoming sentences main.js attaches
-   * to PLAYBACK_STATE (see its forwardToWidget()'s `upcoming` field) as
-   * short plain-text rows; each row's click calls onControl(CONTROL_SEEK,
-   * {index}). The window main.js computes already starts strictly after
-   * the current sentence, so item.index === lastState.index should never
-   * happen in practice -- the current-row class below is just defensive.
-   */
-  /**
-   * Truncates in JS rather than relying on CSS text-overflow -- a short,
-   * fixed-length string can't wrap onto a second line regardless of
-   * whatever is or isn't overriding white-space in the row's actual
-   * rendering context, so this is the reliable fix.
-   */
-  function truncateForRow(text, maxChars = 52) {
-    const trimmed = (text || '').trim();
-    if (trimmed.length <= maxChars) return trimmed;
-    return `${trimmed.slice(0, maxChars - 1).trimEnd()}…`;
-  }
-
-  function updateUpcoming() {
-    const items = Array.isArray(lastState?.upcoming) ? lastState.upcoming : [];
-    refs.upcoming.innerHTML = '';
-    refs.upcoming.hidden = items.length === 0;
-    refs.upcomingLabel.hidden = items.length === 0;
-    for (const item of items) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'boyle-upcoming-row';
-      if (item.index === lastState.index) row.classList.add('boyle-upcoming-row--current');
-      row.dataset.index = String(item.index);
-      row.title = item.text;
-      row.textContent = truncateForRow(item.text);
-      refs.upcoming.appendChild(row);
-    }
-  }
-
   function updateControls() {
     const state = lastState;
     const hasSession = !!state.sessionId && state.index >= 0;
@@ -362,7 +239,6 @@ export function createWidget({ onControl } = {}) {
     lastState = { ...defaultPlaybackState(), ...state };
     if (!hostEl) return; // not mounted yet; state is retained for the next mount()
     updatePreview();
-    updateUpcoming();
     updateControls();
     maybeToastError(lastState);
   }
@@ -431,13 +307,6 @@ export function createWidget({ onControl } = {}) {
       onControl?.(MSG.CONTROL_SKIP, { direction: 'next', granularity: 'sentence' })
     );
     refs.stopBtn.addEventListener('click', () => onControl?.(MSG.CONTROL_STOP, {}));
-
-    refs.upcoming.addEventListener('click', (e) => {
-      const row = e.target.closest?.('.boyle-upcoming-row');
-      if (!row) return;
-      const index = Number(row.dataset.index);
-      if (Number.isFinite(index)) onControl?.(MSG.CONTROL_SEEK, { index });
-    });
 
     refs.rateBtn.addEventListener('click', () => {
       const idx = nearestRateIndex(lastState?.rate ?? DEFAULT_RATE);
@@ -510,8 +379,6 @@ export function createWidget({ onControl } = {}) {
       unitLabel: byRole('unit-label'),
       statusPill: byRole('status-pill'),
       preview: byRole('preview'),
-      upcomingLabel: byRole('upcoming-label'),
-      upcoming: byRole('upcoming'),
       prevBtn: container.querySelector('[data-action="prev"]'),
       playBtn: container.querySelector('[data-action="toggle"]'),
       nextBtn: container.querySelector('[data-action="next"]'),
@@ -533,7 +400,7 @@ export function createWidget({ onControl } = {}) {
     shadow = hostEl.attachShadow({ mode: 'closed' });
 
     const styleEl = document.createElement('style');
-    styleEl.textContent = getWidgetStyles() + UPCOMING_LIST_CSS;
+    styleEl.textContent = getWidgetStyles();
     shadow.appendChild(styleEl);
 
     const container = document.createElement('div');
