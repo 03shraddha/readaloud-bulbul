@@ -30,6 +30,50 @@ const fallbackLog = createLogger('content:article:fallback');
 
 const HEADING_RE = /^H[1-6]$/;
 
+/** Bounded scroll-reveal pass -- see revealLazyContent()'s doc comment. */
+const REVEAL_STEP_WAIT_MS = 120;
+const REVEAL_MAX_STEPS = 30;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+/**
+ * Some sites lazy-reveal body content based on scroll position -- an
+ * IntersectionObserver-driven fade-in library, typically -- leaving the
+ * whole content subtree at `display:none` (or equivalent) until scrolled
+ * near, then it stays revealed permanently (confirmed live on a Deepgram
+ * blog post this way: scrolling back to the top afterward does NOT
+ * re-hide it). buildUnits() runs immediately on activation, before any
+ * scrolling happens, so on such a page it sees nothing and every
+ * paragraph is silently dropped.
+ *
+ * This scrolls top-to-bottom once (bounded, so a pathological/infinite-
+ * scroll page can't hang activation), then restores the original scroll
+ * position -- the reveal itself is what matters, not where the user ends
+ * up looking. Only called as a fallback when the normal extraction pass
+ * already came back empty despite the container clearly having real
+ * text, so pages that don't need this pay nothing for it.
+ * @returns {Promise<void>}
+ */
+async function revealLazyContent() {
+  const originalY = window.scrollY;
+  const step = Math.max(window.innerHeight || 800, 400);
+
+  try {
+    for (let i = 0; i < REVEAL_MAX_STEPS; i++) {
+      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+      const target = Math.min((i + 1) * step, Math.max(0, maxScroll));
+      window.scrollTo(0, target);
+      await sleep(REVEAL_STEP_WAIT_MS);
+      if (target >= maxScroll) break;
+    }
+  } finally {
+    window.scrollTo(0, originalY);
+    await sleep(REVEAL_STEP_WAIT_MS);
+  }
+}
+
 /**
  * @param {Element} el
  * @returns {import('../../shared/types.js').ReadUnit['kind']|null}
@@ -211,17 +255,26 @@ function buildUnits(container, languageCode) {
 }
 
 /**
+ * @returns {Element|null} the page's title heading, if one is visible.
+ */
+function findTitleElement() {
+  try {
+    const h1 = document.querySelector('h1');
+    if (h1 && isElementVisible(h1)) return h1;
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+/**
  * @returns {string}
  */
 function pickTitle() {
-  try {
-    const h1 = document.querySelector('h1');
-    if (h1 && isElementVisible(h1)) {
-      const text = (h1.textContent || '').trim();
-      if (text) return text;
-    }
-  } catch {
-    // fall through to document.title
+  const h1 = findTitleElement();
+  if (h1) {
+    const text = (h1.textContent || '').trim();
+    if (text) return text;
   }
   return (document.title && document.title.trim()) || location.hostname || 'Untitled';
 }
@@ -301,7 +354,37 @@ const articleExtractor = {
     try {
       const languageCode = (this._settings && this._settings.languageCode) || 'en-IN';
       const container = findBestContainer(document);
-      const { units, sentenceTexts } = buildUnits(container, languageCode);
+      let { units, sentenceTexts } = buildUnits(container, languageCode);
+
+      // Signature of scroll-gated lazy content (see revealLazyContent()):
+      // the container has substantial real text but produced zero units,
+      // meaning everything in it was invisible at extraction time.
+      if (units.length === 0 && (container.textContent || '').trim().length > 200) {
+        await revealLazyContent();
+        ({ units, sentenceTexts } = buildUnits(container, languageCode));
+      }
+
+      // Many component-based site templates render the page's <h1> in a
+      // "hero"/header section that's a SIBLING of the main content
+      // container, not a descendant of it (confirmed live on a Deepgram
+      // blog post: the <h1> sits in <section id="blog-detail-hero">, next
+      // to -- not inside -- the <article> tag findBestContainer() picks).
+      // buildUnits() only ever walks inside `container`, so when this
+      // happens the title is silently never spoken at all, even though
+      // pickTitle() below (used only for the metadata `title` field) finds
+      // it fine. Prepend it as its own heading unit whenever it's genuinely
+      // not already going to be picked up by the normal walk -- the
+      // `container.contains()` check is what keeps this a no-op (not a
+      // duplicate read) on the many pages where the title already sits
+      // inside the detected container.
+      const titleEl = findTitleElement();
+      if (titleEl && !container.contains(titleEl)) {
+        const titleUnit = buildUnitForElement(titleEl, 'heading', 0, languageCode);
+        if (titleUnit && titleUnit.sentences.length) {
+          units.unshift(titleUnit);
+          sentenceTexts.unshift(...titleUnit.sentences.map((s) => ({ text: s.text })));
+        }
+      }
 
       const contentHash = contentHashFromSentences(sentenceTexts);
       const contentKey = articleContentKey(location.href, contentHash);
