@@ -85,8 +85,14 @@ const UPCOMING_LIST_CSS = `
 
 .boyle-upcoming-row {
   all: unset;
+  box-sizing: border-box;
   display: block;
   width: 100%;
+  /* Fixed single-line box height + overflow:hidden clips a second line
+     outright (belt-and-suspenders alongside the JS-side truncation in
+     updateUpcoming() -- text is truncated in JS to a safe length, so this
+     is a hard visual backstop, not the primary truncation mechanism). */
+  height: calc(1.4em + 10px);
   padding: 5px 8px;
   border-radius: 6px;
   font-size: 12.5px;
@@ -294,6 +300,18 @@ export function createWidget({ onControl } = {}) {
    * the current sentence, so item.index === lastState.index should never
    * happen in practice -- the current-row class below is just defensive.
    */
+  /**
+   * Truncates in JS rather than relying on CSS text-overflow -- a short,
+   * fixed-length string can't wrap onto a second line regardless of
+   * whatever is or isn't overriding white-space in the row's actual
+   * rendering context, so this is the reliable fix.
+   */
+  function truncateForRow(text, maxChars = 52) {
+    const trimmed = (text || '').trim();
+    if (trimmed.length <= maxChars) return trimmed;
+    return `${trimmed.slice(0, maxChars - 1).trimEnd()}…`;
+  }
+
   function updateUpcoming() {
     const items = Array.isArray(lastState?.upcoming) ? lastState.upcoming : [];
     refs.upcoming.innerHTML = '';
@@ -306,7 +324,7 @@ export function createWidget({ onControl } = {}) {
       if (item.index === lastState.index) row.classList.add('boyle-upcoming-row--current');
       row.dataset.index = String(item.index);
       row.title = item.text;
-      row.textContent = item.text;
+      row.textContent = truncateForRow(item.text);
       refs.upcoming.appendChild(row);
     }
   }
