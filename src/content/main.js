@@ -80,8 +80,10 @@ let nextSentenceIndex = 0;
 /**
  * How many sentences ahead of the current cursor to offer in the widget's
  * click-to-seek list (see computeUpcomingSentences() / forwardToWidget()).
+ * Kept short deliberately -- a longer list reads as a dense, low-contrast
+ * wall of text in the widget's small footprint rather than a quick picker.
  */
-const UPCOMING_WINDOW_SIZE = 8;
+const UPCOMING_WINDOW_SIZE = 5;
 
 /** @type {ReturnType<typeof import('./ui/widget.js')>|null} */
 let widgetModule = null;

@@ -54,13 +54,29 @@ const MAX_TOASTS = 3;
  * follows the same boyle-* naming convention.
  */
 const UPCOMING_LIST_CSS = `
+.boyle-upcoming-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--boyle-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.boyle-upcoming-label[hidden] {
+  display: none;
+}
+
 .boyle-upcoming {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 7.5em;
+  gap: 1px;
+  max-height: 6.6em;
   overflow-y: auto;
   margin-bottom: 10px;
+  border: 1px solid var(--boyle-border);
+  border-radius: 8px;
+  padding: 2px;
 }
 
 .boyle-upcoming[hidden] {
@@ -71,19 +87,25 @@ const UPCOMING_LIST_CSS = `
   all: unset;
   display: block;
   width: 100%;
-  padding: 3px 6px;
+  padding: 5px 8px;
   border-radius: 6px;
-  font-size: 12px;
-  color: var(--boyle-text-muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--boyle-text);
+  opacity: 0.72;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
 }
 
+.boyle-upcoming-row:not(:last-child) {
+  border-bottom: 1px solid var(--boyle-border);
+}
+
 .boyle-upcoming-row:hover {
   background: var(--boyle-border);
-  color: var(--boyle-text);
+  opacity: 1;
 }
 
 .boyle-upcoming-row:focus-visible {
@@ -93,6 +115,7 @@ const UPCOMING_LIST_CSS = `
 
 .boyle-upcoming-row--current {
   color: var(--boyle-grad-from);
+  opacity: 1;
   font-weight: 600;
 }
 `;
@@ -154,6 +177,7 @@ function buildMarkup() {
     <span class="boyle-status-pill" data-role="status-pill">idle</span>
   </div>
   <div class="boyle-preview" data-role="preview"></div>
+  <div class="boyle-upcoming-label" data-role="upcoming-label" hidden>Up next — click to jump</div>
   <div class="boyle-upcoming" data-role="upcoming" hidden></div>
   <div class="boyle-controls">
     <button type="button" class="boyle-icon-btn" data-action="prev" title="Previous sentence" aria-label="Previous sentence">${ICONS.previous}</button>
@@ -274,6 +298,7 @@ export function createWidget({ onControl } = {}) {
     const items = Array.isArray(lastState?.upcoming) ? lastState.upcoming : [];
     refs.upcoming.innerHTML = '';
     refs.upcoming.hidden = items.length === 0;
+    refs.upcomingLabel.hidden = items.length === 0;
     for (const item of items) {
       const row = document.createElement('button');
       row.type = 'button';
@@ -467,6 +492,7 @@ export function createWidget({ onControl } = {}) {
       unitLabel: byRole('unit-label'),
       statusPill: byRole('status-pill'),
       preview: byRole('preview'),
+      upcomingLabel: byRole('upcoming-label'),
       upcoming: byRole('upcoming'),
       prevBtn: container.querySelector('[data-action="prev"]'),
       playBtn: container.querySelector('[data-action="toggle"]'),
