@@ -4,10 +4,8 @@ Boyle is a Chrome extension that reads web pages out loud.
 
 ## Demo
 
-<video src="https://raw.githubusercontent.com/03shraddha/readaloud-bulbul/main/docs/media/demo.mp4" controls width="600"></video>
-
-If the player above does not load, watch the file directly:
-[`docs/media/demo.mp4`](docs/media/demo.mp4).
+[Watch the demo video](docs/media/demo.mp4). Click through to GitHub's
+file page, which plays it inline.
 
 ## What it does
 
