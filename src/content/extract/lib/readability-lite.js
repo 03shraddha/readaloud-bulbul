@@ -43,8 +43,15 @@ const STRIP_TAGS = new Set(['NAV', 'HEADER', 'FOOTER', 'ASIDE', 'FORM', 'SCRIPT'
 
 const STRIP_ROLE_RE = /^(navigation|banner|contentinfo|complementary|search|dialog|alertdialog|toolbar|menu|menubar)$/i;
 
+// `newsletter` has a negative lookahead excluding `-post`/`-body`/
+// `-content`/`-article` suffixes: it's meant to strip "subscribe to my
+// newsletter" promo widgets, but Substack's OWN platform-wide class for
+// the real post body is literally `newsletter-post` -- confirmed live,
+// this stripped the entire article on every Substack post, always
+// falling back to scoring document.body (which then also strips the same
+// real content out of the fallback walk), leaving nothing real to read.
 const STRIP_CLASS_ID_RE =
-  /\b(ad|ads|advert(?:isement)?s?|sponsor(?:ed)?|promo(?:tion)?s?|social[-_]?share|share[-_]?bar|comments?|related[-_]?(?:posts?|articles?)|sidebar|newsletter|cookie[-_]?(?:banner|notice|consent)|popup|modal|site[-_]?header|site[-_]?footer|masthead|breadcrumbs?|pagination|nav(?:bar|igation)?|menu|widget|skip[-_]?link|subscribe|paywall)\b/i;
+  /\b(ad|ads|advert(?:isement)?s?|sponsor(?:ed)?|promo(?:tion)?s?|social[-_]?share|share[-_]?bar|comments?|related[-_]?(?:posts?|articles?)|sidebar|newsletter(?!-(?:post|body|content|article)\b)|cookie[-_]?(?:banner|notice|consent)|popup|modal|site[-_]?header|site[-_]?footer|masthead|breadcrumbs?|pagination|nav(?:bar|igation)?|menu|widget|skip[-_]?link|subscribe|paywall)\b/i;
 
 /**
  * @param {Element} el
@@ -154,7 +161,17 @@ export function findBestContainer(doc = document) {
     } catch {
       score = -Infinity;
     }
-    if (score > bestScore) {
+    // >= rather than > : querySelectorAll returns document order, so an
+    // ancestor wrapper always comes before a descendant candidate it
+    // contains. When one candidate merely wraps another with no
+    // additional scoreable text of its own, the two tie exactly --
+    // confirmed live on a Substack post, where a generic wrapper <div>
+    // around the real <article> scored identically to the <article>
+    // itself, and (with `>` here) the looser wrapper won by having been
+    // seen first, pulling in sibling boilerplate the tighter <article>
+    // would have excluded. Preferring the LAST equal-or-better score
+    // means a tied descendant (the more specific match) wins instead.
+    if (score >= bestScore) {
       bestScore = score;
       best = candidate;
     }

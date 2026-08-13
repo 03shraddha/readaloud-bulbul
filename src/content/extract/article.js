@@ -257,14 +257,50 @@ function buildUnits(container, languageCode) {
 /**
  * @returns {Element|null} the page's title heading, if one is visible.
  */
+/**
+ * @param {string} s
+ * @returns {string}
+ */
+function normalizeForTitleMatch(s) {
+  return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 function findTitleElement() {
+  let candidates = [];
   try {
-    const h1 = document.querySelector('h1');
-    if (h1 && isElementVisible(h1)) return h1;
+    candidates = Array.from(document.querySelectorAll('h1')).filter((el) => {
+      try {
+        return isElementVisible(el);
+      } catch {
+        return true;
+      }
+    });
   } catch {
-    // fall through
+    candidates = [];
   }
-  return null;
+
+  if (!candidates.length) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  // More than one visible <h1> usually means the SITE's own masthead/brand
+  // heading and every body subsection heading are ALSO literally <h1> --
+  // confirmed live on a Substack post, where the publication's name, the
+  // real post title, and every section heading in the body were all <h1>,
+  // distinguished only by class. `document.querySelector('h1')` (the old
+  // behavior) grabbed the FIRST one in DOM order, which was the site's
+  // masthead name, not the post title, since a global header always comes
+  // before the article in the DOM. `document.title` conventionally starts
+  // with the actual page/article title on virtually every site, so prefer
+  // whichever <h1>'s text the document title actually starts with over
+  // just taking the first one.
+  const docTitle = normalizeForTitleMatch(document.title || '');
+  if (docTitle) {
+    for (const el of candidates) {
+      const text = normalizeForTitleMatch((el.textContent || '').trim());
+      if (text && docTitle.startsWith(text)) return el;
+    }
+  }
+  return candidates[0];
 }
 
 /**
