@@ -65,7 +65,7 @@ function assertEqual(actual, expected, message) {
 
 const SESSION_KEY = 'ra.session';
 const storageData = {};
-const liveTabIds = new Set([1, 2, 3, 4]); // 999 is deliberately never "open"
+const liveTabIds = new Set([1, 2, 3, 4, 5]); // 999 is deliberately never "open"
 
 globalThis.chrome = {
   storage: {
@@ -226,6 +226,55 @@ await check('a CONTROL_* whose sessionId does not match the snapshot is not appl
   assertEqual(state.rate, 1.5, 'a matching-sessionId CONTROL_SET_RATE must apply normally once recovered');
 
   await session.handleControlStop('s_owner', 'user-stop', 4);
+});
+
+// ---------------------------------------------------------------------------
+// 3. Re-activating without a fresh CONTENT_READY still resumes correctly
+// ---------------------------------------------------------------------------
+
+group('3. handleStartReading() falls back to a direct progress lookup when there is no pending resume offer');
+
+function fakeUnits(count) {
+  const sentences = [];
+  for (let i = 0; i < count; i++) {
+    sentences.push({ id: `s${i}`, unitId: 'u1', index: i, text: `Sentence ${i}.`, languageCode: 'en-IN', anchorKind: 'virtual', locator: null });
+  }
+  return [{ id: 'u1', kind: 'paragraph', label: null, sentences, meta: {} }];
+}
+
+await check('re-clicking the toolbar icon after a pause (no CONTENT_READY in between) resumes from the last saved index, not the top', async () => {
+  const contentKey = 'article:reactivate:hash1';
+
+  // First activation: fresh read, nothing to resume, reads a few sentences
+  // in, then pauses (this is what writes a real ProgressRecord to storage).
+  const sessionId1 = session.prepareNewSession(5);
+  await session.handleStartReading(
+    { contentKey, contentHash: 'hash1', kind: 'article', title: 'T', url: 'https://example.com/a', units: fakeUnits(5), startIndex: 0, exhausted: true },
+    5,
+    sessionId1
+  );
+  await session.handleControlSeek({ index: 3 }, sessionId1, 5);
+  await session.handleControlPause(sessionId1, 5);
+
+  let state = await session.getPlaybackStateFor(5);
+  assertEqual(state.index, 3, 'sanity check: the first session paused at index 3');
+
+  // Second activation on the SAME tab/content, deliberately with NO pending
+  // resume offer cached (persistence.getPendingResume(5) is untouched here) --
+  // this is exactly what re-clicking the toolbar icon produces on a page
+  // whose one-shot CONTENT_READY pending offer was already consumed (or
+  // never populated) earlier in this same page load.
+  const sessionId2 = session.prepareNewSession(5);
+  await session.handleStartReading(
+    { contentKey, contentHash: 'hash1', kind: 'article', title: 'T', url: 'https://example.com/a', units: fakeUnits(5), startIndex: 0, exhausted: true },
+    5,
+    sessionId2
+  );
+
+  state = await session.getPlaybackStateFor(5);
+  assertEqual(state.index, 3, 're-activating must resume at the previously-saved index, not restart at 0');
+
+  await session.handleControlStop(sessionId2, 'user-stop', 5);
 });
 
 // ---------------------------------------------------------------------------

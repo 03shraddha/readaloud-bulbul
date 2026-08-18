@@ -714,7 +714,7 @@ async function resolveCurrent(incomingSessionId, tabId) {
  * @param {number|null} tabId
  * @param {string|null} incomingSessionId
  */
-export function handleStartReading(payload, tabId, incomingSessionId) {
+export async function handleStartReading(payload, tabId, incomingSessionId) {
   const session = requireCurrent(incomingSessionId, tabId);
   if (!session) {
     log.warn('START_READING for unknown/stale session, ignoring', incomingSessionId, tabId);
@@ -727,6 +727,20 @@ export function handleStartReading(payload, tabId, incomingSessionId) {
   if (pending) {
     session.tryApplyResume(pending.record);
     persistence.clearPendingResume(tabId);
+  } else {
+    // The "pending" resume offer is populated exactly once, at CONTENT_READY
+    // (page-load) time, and consumed exactly once by whichever ACTIVATE
+    // reads it first. Re-activating later on the SAME page load (e.g.
+    // re-clicking the toolbar icon after pausing, rather than using the
+    // widget's own Play button) found no pending offer and silently
+    // restarted from the top every time, even though a perfectly good,
+    // continuously-updated progress record for this exact content already
+    // existed in storage. Fall back to a direct, exact-key lookup now that
+    // the session's real contentKey is known (post-extraction) -- this is
+    // MORE precise than the pending offer's URL-based guess, and makes
+    // every activation resume correctly, not just the first one.
+    const record = await persistence.getStoredProgress(session.contentKey);
+    if (record) session.tryApplyResume(record);
   }
 
   // Extraction finishing does not mean the user wants audio yet -- activating

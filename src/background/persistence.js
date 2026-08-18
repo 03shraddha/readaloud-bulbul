@@ -324,6 +324,27 @@ export function clearPendingResume(tabId) {
 }
 
 /**
+ * Direct, exact-key progress lookup -- used when a session already knows
+ * its precise contentKey (post-extraction) and wants the freshest stored
+ * progress for it, as opposed to findResumeCandidate()'s URL-based,
+ * pre-extraction guess used for the CONTENT_READY -> RESUME_AVAILABLE
+ * banner. See session.js's handleStartReading() for why this is needed
+ * even after the one-shot pending-resume offer has already been consumed
+ * (or never existed) for this page load.
+ * @param {string|null|undefined} contentKey
+ * @returns {Promise<import('../shared/types.js').ProgressRecord|null>}
+ */
+export async function getStoredProgress(contentKey) {
+  if (!contentKey) return null;
+  try {
+    return await getProgress(contentKey);
+  } catch (err) {
+    log.error('getStoredProgress failed', err);
+    return null;
+  }
+}
+
+/**
  * Handles RESUME_DECISION. Returns true iff the caller (service-worker)
  * should now activate the tab (send ACTIVATE) to kick off extraction; the
  * actual index/hash application happens later, once START_READING lands
