@@ -159,7 +159,15 @@ function buildTextFromNode(node) {
         out += isHashtagOrMention ? label : ` ${describeUrl(href)} `;
       } else if (tag === 'IMG') {
         const alt = child.getAttribute('alt');
-        if (alt) out += alt;
+        // Only append genuine inline emoji glyphs, not a real image
+        // description that happens to sit on an inline <img> -- confirmed
+        // live that X's own emoji renders as a short, space-free alt (a
+        // single glyph or a multi-codepoint ZWJ sequence, e.g. "🪄", "✅").
+        // A real description is a sentence: it has whitespace and runs
+        // much longer, and reads oddly stitched into the middle of the
+        // tweet's own text. Skipping it here just omits it from `out` --
+        // the rest of the tweet's text keeps building normally.
+        if (alt && !/\s/.test(alt) && alt.length <= 16) out += alt;
       } else {
         out += buildTextFromNode(child);
       }
