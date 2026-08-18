@@ -332,11 +332,22 @@ async function ensureVisible(sentence) {
   if (!article) return false;
 
   if (state.settings.autoScroll) {
-    // No-ops when `article` is already comfortably on screen -- without
-    // this, a thread/tweet with several sentences re-centers the viewport
-    // on every single one, which visibly races ahead of the actual reading
-    // pace. See lib/scroll.js.
-    scrollIntoViewSmart(article, { behavior: 'smooth', block: 'center' });
+    // Scroll to the SAME specific range/element resolveAnchor() will
+    // highlight, not the whole `article` card -- a tweet's card can easily
+    // be taller than the viewport (a long tweet with several sentences,
+    // an image, a quote; confirmed live: a 758px-tall card against a
+    // 688px viewport), and centering the whole oversized card can never
+    // satisfy scrollIntoViewSmart's "comfortably in view" check, no matter
+    // which sentence within it is actually being read right now -- so it
+    // re-triggers on every sentence and can leave the one actually being
+    // read drifting toward (or past) the edge of the screen. Falling back
+    // to the whole article only when a precise target isn't resolvable
+    // keeps the "no-op when already comfortable" behavior working for the
+    // common case (a short tweet, or a sentence whose target IS the whole
+    // element already, e.g. a poll/link-card).
+    const anchor = await resolveAnchor(sentence);
+    const target = anchor?.kind === 'range' ? anchor.range : anchor?.kind === 'element' ? anchor.element : article;
+    scrollIntoViewSmart(target, { behavior: 'smooth', block: 'center' });
   }
   return true;
 }
