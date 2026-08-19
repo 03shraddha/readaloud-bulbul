@@ -161,9 +161,13 @@ class Session {
    * Best-effort resume: apply a stored progress record on top of a
    * just-started session, if it still applies.
    * @param {import('../shared/types.js').ProgressRecord|null} record
+   * @returns {boolean} true if a cursor was actually resumed from `record`;
+   *   false if there was nothing to apply (no record, rejected as stale,
+   *   or no matching position found) -- callers use this to decide whether
+   *   a more precise fallback lookup is worth trying. See handleStartReading().
    */
   tryApplyResume(record) {
-    if (!record) return;
+    if (!record) return false;
 
     if (this.kind === 'article') {
       if (!persistence.isArticleResumeValid(this, record)) {
@@ -173,11 +177,11 @@ class Session {
             message: 'This article changed since you last read it — starting from the top.',
           })
         );
-        return;
+        return false;
       }
       const clamped = Math.min(Math.max(record.index || 0, 0), Math.max(this.totalSentences - 1, 0));
       this.cursor = clamped;
-      return;
+      return true;
     }
 
     if (this.kind === 'twitter') {
@@ -190,7 +194,7 @@ class Session {
         // actively wrong, not just imprecise: it skips the article outright
         // and yanks the page down to an unrelated tweet. Always start a
         // fresh Article read at the top instead of guessing.
-        return;
+        return false;
       }
 
       this.lastStatusId = record.lastStatusId || null;
@@ -202,9 +206,13 @@ class Session {
         );
         if (idx !== -1) {
           this.cursor = Math.min(idx + 1, Math.max(this.totalSentences - 1, 0));
+          return true;
         }
       }
+      return false;
     }
+
+    return false;
   }
 
   /**
@@ -724,22 +732,40 @@ export async function handleStartReading(payload, tabId, incomingSessionId) {
   session.applyStartReading(payload);
 
   const pending = tabId != null ? persistence.getPendingResume(tabId) : null;
+  let resumed = false;
   if (pending) {
-    session.tryApplyResume(pending.record);
+    resumed = session.tryApplyResume(pending.record);
     persistence.clearPendingResume(tabId);
-  } else {
-    // The "pending" resume offer is populated exactly once, at CONTENT_READY
+  }
+
+  if (!resumed) {
+    // Falls through here in two cases: (a) no pending offer at all -- the
+    // "pending" resume is populated exactly once, at CONTENT_READY
     // (page-load) time, and consumed exactly once by whichever ACTIVATE
-    // reads it first. Re-activating later on the SAME page load (e.g.
-    // re-clicking the toolbar icon after pausing, rather than using the
-    // widget's own Play button) found no pending offer and silently
-    // restarted from the top every time, even though a perfectly good,
-    // continuously-updated progress record for this exact content already
-    // existed in storage. Fall back to a direct, exact-key lookup now that
-    // the session's real contentKey is known (post-extraction) -- this is
-    // MORE precise than the pending offer's URL-based guess, and makes
-    // every activation resume correctly, not just the first one.
+    // reads it first, so re-clicking the toolbar icon again later in the
+    // same page load (rather than using the widget's own Play button)
+    // always found it already gone; or (b) a pending offer existed but
+    // tryApplyResume() rejected/couldn't use it (e.g. its URL-based guess
+    // landed on a since-changed article version) -- in which case the
+    // EXACT contentKey, now known post-extraction, might still have a
+    // valid, more specific record even though the coarser guess didn't.
+    // Either way, a direct lookup by the session's real contentKey is
+    // strictly more precise than the pending offer's URL-based guess.
     const record = await persistence.getStoredProgress(session.contentKey);
+
+    // The lookup above is this function's only await, and a rapid second
+    // (or third) activation on the same tab -- e.g. mashing the toolbar
+    // icon -- can replace `current` with a NEWER session while it was in
+    // flight. Applying a resume to `session` past this point would mutate
+    // an object nothing references anymore and could still fire a stray
+    // toast/message for a session the user has already moved past. Bail
+    // out quietly rather than act on stale state; mirrors resolveCurrent()'s
+    // own re-check after its recovery await, just above.
+    if (current !== session) {
+      log.debug('session superseded during resume lookup, discarding stale resume attempt', session.sessionId);
+      return;
+    }
+
     if (record) session.tryApplyResume(record);
   }
 

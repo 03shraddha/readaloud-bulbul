@@ -67,6 +67,10 @@ const SESSION_KEY = 'ra.session';
 const storageData = {};
 const liveTabIds = new Set([1, 2, 3, 4, 5]); // 999 is deliberately never "open"
 
+/** Every chrome.tabs.sendMessage call, for tests that need to observe
+ * whether a (possibly stale/superseded) session actually messaged the tab. */
+const sentTabMessages = [];
+
 globalThis.chrome = {
   storage: {
     local: {
@@ -93,7 +97,8 @@ globalThis.chrome = {
       }
       return { id: tabId };
     },
-    async sendMessage() {
+    async sendMessage(tabId, envelope) {
+      sentTabMessages.push({ tabId, envelope });
       return undefined;
     },
   },
@@ -275,6 +280,95 @@ await check('re-clicking the toolbar icon after a pause (no CONTENT_READY in bet
   assertEqual(state.index, 3, 're-activating must resume at the previously-saved index, not restart at 0');
 
   await session.handleControlStop(sessionId2, 'user-stop', 5);
+});
+
+await check('a session superseded mid-resume-lookup does not apply stale state or message the tab', async () => {
+  const contentKeyA = 'article:racea:hash1';
+  const contentKeyB = 'article:raceb:hash2';
+
+  // Seed A's record with a MISMATCHED contentHash ('oldhash' vs A's own
+  // extraction reporting 'hash1' below) -- this is what makes the test
+  // meaningful: tryApplyResume()'s article-kind REJECTION path
+  // (isArticleResumeValid() failing) calls sendToTab() directly with no
+  // destroyed/stopped guard of its own, unlike markReady() (which already
+  // no-ops for a destroyed session). A matching hash would take the
+  // SUCCESS path instead, which only mutates `cursor` silently and would
+  // pass even without the fix this test is meant to catch.
+  storageData[`ra.progress.${contentKeyA}`] = {
+    schemaVersion: 1,
+    contentKey: contentKeyA,
+    kind: 'article',
+    url: 'https://example.com/a',
+    title: 'A',
+    contentHash: 'oldhash',
+    index: 7,
+    unitId: null,
+    sentenceId: null,
+    previewText: '',
+    totalSentences: 10,
+    lastStatusId: null,
+    readStatusIds: [],
+    updatedAt: Date.now(),
+  };
+
+  const sessionIdA = session.prepareNewSession(1);
+  const payloadA = {
+    contentKey: contentKeyA,
+    contentHash: 'hash1',
+    kind: 'article',
+    title: 'A',
+    url: 'https://example.com/a',
+    units: fakeUnits(10),
+    startIndex: 0,
+    exhausted: true,
+  };
+
+  // Start A's handleStartReading but do NOT await it yet: with no pending
+  // resume cached, it runs synchronously up to `await
+  // persistence.getStoredProgress(...)` and suspends there, exactly like a
+  // real await yielding control back to the message loop.
+  const pendingA = session.handleStartReading(payloadA, 1, sessionIdA);
+
+  // Synchronously (before A's suspended lookup resolves), a second
+  // activation on the SAME tab supersedes it -- e.g. mashing the toolbar
+  // icon twice in quick succession. prepareNewSession() itself legitimately
+  // ends A first (CLEAR_HIGHLIGHT + SESSION_ENDED, sent with A's sessionId)
+  // -- that's correct, expected teardown, not the bug under test. The
+  // marker is captured AFTER that teardown so it only covers messages from
+  // this point on.
+  const sessionIdB = session.prepareNewSession(1);
+  const messageCountAfterSupersedeTeardown = sentTabMessages.length;
+
+  const payloadB = {
+    contentKey: contentKeyB,
+    contentHash: 'hash2',
+    kind: 'article',
+    title: 'B',
+    url: 'https://example.com/b',
+    units: fakeUnits(3),
+    startIndex: 0,
+    exhausted: true,
+  };
+  await session.handleStartReading(payloadB, 1, sessionIdB);
+
+  // Now let A's suspended call finish.
+  await pendingA;
+
+  const state = await session.getPlaybackStateFor(1);
+  assertEqual(state.sessionId, sessionIdB, '`current` must still be the newer session B, not stale A');
+  assertEqual(state.contentKey, contentKeyB, "B's own content must be reported, unaffected by A's late resume");
+  assertEqual(state.index, 0, "B must not have inherited A's resumed index (7)");
+
+  // The real point: A's late resume/markReady() must never have run at all,
+  // so -- after its own legitimate teardown -- it must never send anything
+  // else to the tab (no PLAYBACK_STATE from a stale markReady(), no TOAST
+  // from a stale tryApplyResume() rejection).
+  const messagesFromAAfterSupersede = sentTabMessages
+    .slice(messageCountAfterSupersedeTeardown)
+    .filter((m) => m.envelope?.sessionId === sessionIdA);
+  assertEqual(messagesFromAAfterSupersede.length, 0, 'a superseded session must not message the tab after losing the race');
+
+  await session.handleControlStop(sessionIdB, 'user-stop', 1);
 });
 
 // ---------------------------------------------------------------------------
