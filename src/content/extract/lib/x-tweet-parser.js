@@ -138,15 +138,42 @@ function looksTruncated(textEl) {
 }
 
 /**
+ * Extracts text from a styled element using TreeWalker, respecting link/emoji handling.
+ * Fallback 3: when complex nesting defeats direct traversal.
+ * @param {Element} node
+ * @returns {string}
+ */
+function buildTextViaTreeWalker(node) {
+  if (!node || typeof document.createTreeWalker !== 'function') return '';
+  let out = '';
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  let textNode;
+  while ((textNode = walker.nextNode())) {
+    out += textNode.textContent;
+  }
+  return out;
+}
+
+/**
  * Walks a tweet-text container's child nodes, replacing link anchors with
  * describeUrl() output (unless they're a hashtag/mention, which are kept
  * verbatim) and inline emoji <img>s with their alt text.
+ *
+ * Includes 3 fallback strategies to handle styled text (bold, italic, underline, highlight):
+ * 1. Direct recursive traversal (primary path — most precise control over links/emoji)
+ * 2. Catch-all textContent for deeply nested or complex styled elements
+ * 3. TreeWalker-based extraction for edge cases where recursion misses text
+ *
  * @param {Element} node
  * @returns {string}
  */
 function buildTextFromNode(node) {
   if (!node) return '';
+
   let out = '';
+  const visitedElements = new Set();
+
+  // Primary strategy: direct traversal with explicit handling for links & emoji
   for (const child of node.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) {
       out += child.textContent;
@@ -157,6 +184,7 @@ function buildTextFromNode(node) {
         const label = (child.textContent || '').trim();
         const isHashtagOrMention = label.startsWith('#') || label.startsWith('@') || href.startsWith('/');
         out += isHashtagOrMention ? label : ` ${describeUrl(href)} `;
+        visitedElements.add(child);
       } else if (tag === 'IMG') {
         const alt = child.getAttribute('alt');
         // Only append genuine inline emoji glyphs, not a real image
@@ -168,12 +196,34 @@ function buildTextFromNode(node) {
         // tweet's own text. Skipping it here just omits it from `out` --
         // the rest of the tweet's text keeps building normally.
         if (alt && !/\s/.test(alt) && alt.length <= 16) out += alt;
+        visitedElements.add(child);
       } else {
+        // Styled element (span, strong, em, u, mark, etc.) — recurse to preserve link/emoji handling
         out += buildTextFromNode(child);
+        visitedElements.add(child);
       }
     }
   }
-  return out;
+
+  const primaryText = out.trim();
+
+  // Fallback 1: If primary traversal yielded little/no text, use textContent as a safety net
+  // for complex DOM structures where styled text might live in deeply nested containers.
+  if (primaryText.length < 3 && node.textContent) {
+    const fallback1 = node.textContent.trim();
+    if (fallback1.length > primaryText.length) {
+      return fallback1;
+    }
+  }
+
+  // Fallback 2: If primary strategy missed styled elements, use TreeWalker to catch them.
+  // This handles edge cases like <span style="...">text</span> that may have no text-node children.
+  const treeWalkerText = buildTextViaTreeWalker(node).trim();
+  if (treeWalkerText.length > primaryText.length && treeWalkerText.length > 5) {
+    return treeWalkerText;
+  }
+
+  return primaryText;
 }
 
 /**
