@@ -98,6 +98,12 @@ class Session {
      * flowing before the pause). See handleControlPlay(). */
     this.everPlayed = false;
 
+    /** Generation counter: increments on each seekTo(), used to ignore
+     * stale SENTENCE_STARTED events that arrive after a seek (especially
+     * backwards seeks where in-flight audio events could move cursor forward
+     * again, undoing the back navigation). See handleSentenceStarted(). */
+    this.seekGeneration = 0;
+
     /** @type {Map<number, number|null>} index -> durationHintMs, cleared once consumed */
     this.durationHints = new Map();
 
@@ -361,6 +367,11 @@ class Session {
   /**
    * The exact skip/seek sequence from shared_contracts §9: mutate cursor ->
    * AUDIO_FLUSH{fromIndex} -> reset prefetch -> re-enqueue.
+   *
+   * Increments seekGeneration to invalidate any in-flight SENTENCE_STARTED
+   * events from before this seek (especially important for backwards seeks,
+   * where audio events could move the cursor forward again and undo the
+   * navigation).
    * @param {number} newIndex
    */
   seekTo(newIndex) {
@@ -373,6 +384,7 @@ class Session {
     }
 
     this.cursor = target;
+    this.seekGeneration++;
 
     offscreenManager.sendToOffscreen(
       makeEnvelope(MSG.AUDIO_FLUSH, TARGET.OFFSCREEN, this.sessionId, { fromIndex: target })
@@ -421,7 +433,16 @@ class Session {
    * @param {import('../shared/types.js').SentenceStartedPayload} payload
    */
   handleSentenceStarted(payload) {
-    if (payload.index < this.cursor) return; // stale/out-of-order, defensive no-op
+    // Ignore events for sentences before the current cursor (stale/out-of-order).
+    if (payload.index < this.cursor) return;
+
+    // Ignore events that would move cursor forward if we're buffering after a seek.
+    // This prevents in-flight audio events from undoing a backwards seek. The offscreen
+    // audio queue may emit SENTENCE_STARTED for audio that started playing before the
+    // flush was received, moving the cursor forward even though we just navigated back.
+    if (payload.index > this.cursor && this.status === 'buffering') {
+      return; // Discard — wait for the seek target's audio to start instead.
+    }
 
     this.cursor = payload.index;
     const sentence = this.sentences[payload.index];
