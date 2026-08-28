@@ -56,6 +56,11 @@ export class PrefetchQueue {
     /** @type {ReturnType<typeof setTimeout>|null} */
     this.stallTimer = null;
     this.stopped = true;
+    /** Throttle "sentence could not be voiced" toasts to avoid pileup.
+     * Counts consecutive skip failures; toast shows total after a delay. */
+    this.skippedSentenceCount = 0;
+    /** @type {ReturnType<typeof setTimeout>|null} */
+    this.skipToastTimer = null;
   }
 
   /** @returns {number} sentences dispatched-or-in-flight ahead of the playhead */
@@ -76,6 +81,8 @@ export class PrefetchQueue {
     this.expectedOffscreenCursor = fromIndex;
     this.awaitingMoreUnits = false;
     this.clearStallTimer();
+    this.clearSkipToastTimer();
+    this.skippedSentenceCount = 0;
     this.stopped = false;
   }
 
@@ -110,6 +117,13 @@ export class PrefetchQueue {
     if (this.stallTimer) {
       clearTimeout(this.stallTimer);
       this.stallTimer = null;
+    }
+  }
+
+  clearSkipToastTimer() {
+    if (this.skipToastTimer) {
+      clearTimeout(this.skipToastTimer);
+      this.skipToastTimer = null;
     }
   }
 
@@ -331,13 +345,25 @@ export class PrefetchQueue {
       if (err?.aborted) return; // aborted due to skip/seek/stop; not a real failure
 
       log.warn(`synth failed for sentence ${sentence.id} (index ${idx}), skipping`, err?.message);
-      session.sendToTab(
-        makeEnvelope(MSG.TOAST, TARGET.CONTENT, session.sessionId, {
-          level: 'warn',
-          message: 'Skipped a sentence that could not be voiced.',
-          code: err?.code,
-        })
-      );
+
+      // Throttle "skipped sentence" toasts to prevent pileup when multiple
+      // sentences fail in quick succession (e.g., backend outage, rate limit).
+      // Accumulate count and show a single toast after a brief delay.
+      this.skippedSentenceCount++;
+      this.clearSkipToastTimer();
+      this.skipToastTimer = setTimeout(() => {
+        const count = this.skippedSentenceCount;
+        session.sendToTab(
+          makeEnvelope(MSG.TOAST, TARGET.CONTENT, session.sessionId, {
+            level: 'warn',
+            message: count === 1
+              ? 'Skipped a sentence that could not be voiced.'
+              : `Skipped ${count} sentences that could not be voiced.`,
+            code: err?.code,
+          })
+        );
+        this.skippedSentenceCount = 0;
+      }, 200); // Wait 200ms to batch multiple failures
 
       if (this.stopped) return;
       this.deadIndices.add(idx);
