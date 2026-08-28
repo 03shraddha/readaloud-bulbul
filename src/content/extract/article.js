@@ -95,6 +95,24 @@ function classifyElement(el) {
   // actually wrote, unlike alt text, which is frequently absent, generic,
   // or auto-generated.
 
+  // Substack, Medium, and other platforms use <div> elements for paragraphs.
+  // Classify as paragraph if it's a div with meaningful text and no block children.
+  if (tag === 'DIV') {
+    const text = (el.textContent || '').trim();
+    if (text.length > 30) {
+      // Check if it has any block-level child elements that would be classified as units.
+      // If it does, let those children be extracted instead of treating this div as a unit.
+      for (const child of el.children) {
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          const childKind = classifyElement(child);
+          if (childKind) return null; // has structured children; don't classify parent
+        }
+      }
+      // No classified children; treat as a paragraph div
+      return 'paragraph';
+    }
+  }
+
   return null;
 }
 
