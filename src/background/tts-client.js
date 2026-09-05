@@ -11,7 +11,7 @@
  * is responsible for skipping that sentence, toasting, and moving on.
  */
 
-import { SYNTH_PATH } from '../shared/constants.js';
+import { SYNTH_PATH, DEFAULT_SPEAKER } from '../shared/constants.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('background:tts-client');
@@ -93,10 +93,15 @@ async function synthesizeOnce({ sentence, settings, signal }) {
   const baseUrl = settings?.backendBaseUrl;
   const url = `${baseUrl}${SYNTH_PATH}`;
 
+  // Fallback to DEFAULT_SPEAKER if speaker is invalid/missing
+  const speaker = (settings?.speaker && settings.speaker !== 'default' && settings.speaker.trim())
+    ? settings.speaker.trim()
+    : DEFAULT_SPEAKER;
+
   const body = {
     text: sentence.text,
     language_code: sentence.languageCode || settings?.languageCode,
-    speaker: settings?.speaker,
+    speaker,
     pace: settings?.pace,
     temperature: settings?.temperature,
     speech_sample_rate: 24000,
