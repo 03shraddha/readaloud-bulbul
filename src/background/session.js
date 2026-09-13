@@ -248,7 +248,18 @@ class Session {
   appendUnits(payload) {
     this.ingestUnits(payload.units);
     this.exhausted = !!payload.exhausted;
-    this.prefetchQueue.onUnitsAppended();
+    // A recovered-from-snapshot session (see recoverSessionForTab()) starts
+    // with prefetchQueue.stopped still true -- it deliberately never called
+    // start() because it had no sentences to fill with yet, only a bare
+    // cursor. This first APPEND_UNITS (the RESYNC_UNITS reply) is what
+    // actually gives it real content, so bootstrap the queue now instead of
+    // onUnitsAppended(), which is a no-op against a queue that was never
+    // started (fill() bails immediately on `stopped`).
+    if (this.prefetchQueue.stopped) {
+      this.prefetchQueue.start(this.cursor);
+    } else {
+      this.prefetchQueue.onUnitsAppended();
+    }
   }
 
   // --- CONTROL_* transitions -------------------------------------------------
@@ -386,9 +397,32 @@ class Session {
     this.cursor = target;
     this.seekGeneration++;
 
-    offscreenManager.sendToOffscreen(
-      makeEnvelope(MSG.AUDIO_FLUSH, TARGET.OFFSCREEN, this.sessionId, { fromIndex: target })
-    );
+    // AUDIO_FLUSH must actually reach a live offscreen document. Sending it
+    // blind (as this used to) silently vanishes into safeSendRuntimeMessage's
+    // ignored "no receiver" error if the document hasn't been created yet —
+    // e.g. the user skips ahead several times right after the article loads,
+    // before the very first prefetch's ensureOffscreenReady() call has
+    // resolved. When that happens the offscreen AudioQueue's cursor is left
+    // stuck at whatever it was last initialized to; _pump() then refuses to
+    // ever promote any of the newly-synthesized sentences at the skip
+    // target, because none of their indices match that stale cursor. Play
+    // afterwards shows 'buffering' forever, with the target sentence (and
+    // several past it) already synthesized and sitting unused. Routing the
+    // flush through ensureOffscreenReady() (same as handleControlPlay()
+    // does for AUDIO_PLAY) guarantees the document exists first, and if it
+    // still needed creating, seeds it with the CURRENT target rather than
+    // whatever cursor value was captured back when the document creation
+    // was first kicked off.
+    offscreenManager
+      .ensureOffscreenReady(this.sessionId, this.rate, target)
+      .then(() => {
+        offscreenManager.sendToOffscreen(
+          makeEnvelope(MSG.AUDIO_FLUSH, TARGET.OFFSCREEN, this.sessionId, { fromIndex: target })
+        );
+      })
+      .catch((err) => {
+        log.error('failed to ensure offscreen ready for seek', err);
+      });
 
     this.prefetchQueue.start(target);
 
@@ -698,14 +732,31 @@ async function recoverSessionForTab(tabId) {
   // from silently no-op'ing against a null `current`.
   recovered.status = 'paused';
 
-  // Restart the fetch pipeline, same effect as markReady() has for a
-  // freshly-extracted session -- otherwise PrefetchQueue.stopped stays true
-  // (its constructor default) forever and a later Play just sends AUDIO_PLAY
-  // to an offscreen document with nothing queued, stuck in 'buffering' for
-  // good. Unlike markReady(), this must NOT re-send SESSION_STARTED or touch
-  // `status`: the recovered session already has its identity from the
-  // snapshot, and playback must still wait for an explicit Play press.
-  recovered.prefetchQueue.start(recovered.cursor);
+  // The snapshot carries only cursor/rate/contentKey -- NOT the sentence
+  // array (chrome.storage would have to hold the whole article/thread to do
+  // that). Naively calling prefetchQueue.start() here would immediately hit
+  // fill()'s "no sentence at this index" branch and fall back to
+  // REQUEST_MORE_UNITS -- which, for an 'article' (or X Article-view)
+  // session, hits the content extractor's extractMore(), a permanent
+  // `{units: [], exhausted: true}` stub (there's nothing incremental to
+  // fetch; articles are extracted in one upfront pass). That would mark the
+  // session exhausted with ZERO sentences ever ingested and strand it
+  // forever -- a later Play would sit on 'buffering' with no error and no
+  // way to ever recover. Twitter-kind sessions would technically survive
+  // that path (extractMore() there is real), but would also trigger an
+  // unwanted auto-scroll hunt for more tweets on a tab the user may not even
+  // be looking at.
+  //
+  // Instead, ask the content script to resend everything it already
+  // extracted (RESYNC_UNITS) -- its own state was never touched by this
+  // service-worker restart, so nothing needs re-extracting. prefetchQueue
+  // stays in its default `stopped: true` state until that reply actually
+  // lands as an APPEND_UNITS; appendUnits() starts the queue at that point
+  // (see its own comment). If the content script never replies (tab
+  // navigated away, extension context gone), the session simply stays
+  // stopped/paused rather than spinning forever on empty content -- the
+  // correct outcome when there truly is nothing left to resume.
+  safeSendTabMessage(tabId, makeEnvelope(MSG.RESYNC_UNITS, TARGET.CONTENT, recovered.sessionId, {}));
 
   current = recovered;
   log.info('recovered session from snapshot after service-worker restart', {

@@ -196,6 +196,18 @@ export class AudioQueue {
       } catch {
         /* noop */
       }
+      // A resumed play() must be able to re-confirm SENTENCE_STARTED for
+      // this same item (see _onPlaying()'s startedEmitted guard) -- pausing
+      // ends this playback stretch, and resuming genuinely starts a new one.
+      // This matters most across a service-worker restart: this offscreen
+      // document survives that restart untouched (a separate execution
+      // context), but background's Session object does not -- a recovered
+      // Session starts with everPlayed=false and sits on 'buffering' until a
+      // fresh SENTENCE_STARTED confirms playback, which would otherwise
+      // never come for an item already marked started before the restart,
+      // leaving the status pill stuck on 'buffering' forever even though
+      // audio is genuinely playing.
+      this.current.startedEmitted = false;
     }
   }
 

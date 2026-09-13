@@ -74,6 +74,22 @@ const sentenceMap = new Map();
 /** Monotonic cursor for Sentence.index, never reused within a session. */
 let nextSentenceIndex = 0;
 
+/**
+ * Every locator-free unit batch ever sent for the CURRENT activation (the
+ * original START_READING batch plus every APPEND_UNITS batch since), in
+ * order. This is what makes RESYNC_UNITS possible: this content script's own
+ * extraction state survives a background service-worker restart untouched
+ * (it's a separate execution context), so re-supplying a background Session
+ * that lost its sentence array in that restart doesn't require re-running
+ * extraction at all -- everything it needs was already produced and is just
+ * sitting here. See handleResyncUnits().
+ * @type {import('../shared/types.js').ReadUnit[]}
+ */
+let lastSentUnits = [];
+
+/** The most recent `exhausted` flag reported alongside `lastSentUnits`. */
+let lastKnownExhausted = false;
+
 /** @type {ReturnType<typeof import('./ui/widget.js')>|null} */
 let widgetModule = null;
 
@@ -190,6 +206,9 @@ async function handleActivate() {
     const units = assignIndicesAndStrip(result.units);
     const startIndex = units[0]?.sentences[0]?.index ?? 0;
 
+    lastSentUnits = units;
+    lastKnownExhausted = !!result.exhausted;
+
     await safeSendRuntimeMessage(
       makeEnvelope(MSG.START_READING, TARGET.BACKGROUND, sessionId, {
         contentKey: result.contentKey,
@@ -217,15 +236,41 @@ async function handleRequestMoreUnits(payload) {
     const units = result ? assignIndicesAndStrip(result.units) : [];
     const exhausted = result ? result.exhausted : true;
 
+    lastSentUnits = lastSentUnits.concat(units);
+    lastKnownExhausted = exhausted;
+
     await safeSendRuntimeMessage(
       makeEnvelope(MSG.APPEND_UNITS, TARGET.BACKGROUND, sessionId, { units, exhausted })
     );
   } catch (err) {
     log.error('extractMore failed', err);
+    lastKnownExhausted = true;
     await safeSendRuntimeMessage(
       makeEnvelope(MSG.APPEND_UNITS, TARGET.BACKGROUND, sessionId, { units: [], exhausted: true })
     );
   }
+}
+
+/**
+ * RESYNC_UNITS: background lost its in-memory Session.sentences array (a
+ * service-worker restart, most commonly triggered by pausing long enough for
+ * MV3 to evict the idle worker -- see session.js's recoverSessionForTab())
+ * and is rebuilding a session from a bare persisted snapshot (cursor/rate/
+ * contentKey only, no sentence data). Rather than treating this like a
+ * buffer-low REQUEST_MORE_UNITS -- which for an 'article'-kind extractor
+ * would hit extractMore()'s permanent `{units: [], exhausted: true}` stub
+ * and strand the session with zero content, forever -- just resend
+ * everything already extracted this page load. This content script's own
+ * state was never affected by the background's restart, so there's nothing
+ * to re-extract.
+ */
+async function handleResyncUnits() {
+  await safeSendRuntimeMessage(
+    makeEnvelope(MSG.APPEND_UNITS, TARGET.BACKGROUND, sessionId, {
+      units: lastSentUnits,
+      exhausted: lastKnownExhausted,
+    })
+  );
 }
 
 /**
@@ -384,6 +429,9 @@ function onRuntimeMessage(env, _sender, _sendResponse) {
     case MSG.REQUEST_MORE_UNITS:
       handleRequestMoreUnits(env.payload);
       break;
+    case MSG.RESYNC_UNITS:
+      handleResyncUnits();
+      break;
     case MSG.HIGHLIGHT_SENTENCE:
       handleHighlightSentence(env.payload);
       break;
@@ -440,6 +488,8 @@ function teardown() {
   activeExtractor = null;
   sentenceMap.clear();
   nextSentenceIndex = 0;
+  lastSentUnits = [];
+  lastKnownExhausted = false;
   activeHighlightId = null;
   // Synchronous best-effort: only possible if the module was already loaded
   // (pagehide gives us no time to await a dynamic import).

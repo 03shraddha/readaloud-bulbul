@@ -46,6 +46,7 @@ export const MSG = Object.freeze({
   REQUEST_MORE_UNITS: 'REQUEST_MORE_UNITS',
   RESUME_AVAILABLE: 'RESUME_AVAILABLE',
   TOAST: 'TOAST',
+  RESYNC_UNITS: 'RESYNC_UNITS',
 
   // --- background -> offscreen ---
   OFFSCREEN_INIT: 'OFFSCREEN_INIT',

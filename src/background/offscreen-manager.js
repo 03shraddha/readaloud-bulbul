@@ -144,7 +144,16 @@ export async function ensureOffscreenReady(sessionId, rate, startIndex) {
   // one would independently observe "no document yet" and send its own
   // OFFSCREEN_INIT — and every OFFSCREEN_INIT resets the AudioQueue
   // (clearing the queue and wantsPlay), which can silently kill playback
-  // right after it starts.
+  // right after it starts. This guard only dedupes calls that land while a
+  // check is genuinely IN FLIGHT (see the `finally` below, which clears it
+  // once settled) — it must never cache a stale "already checked" result
+  // across calls, because chrome.offscreen documents can disappear on their
+  // own (idle/memory-pressure teardown) without this module hearing about
+  // it. A resume-from-pause that trusted a stale resolved promise here
+  // would skip recreating a dead document and silently vanish the
+  // subsequent AUDIO_PLAY into safeSendRuntimeMessage's ignored
+  // "Receiving end does not exist" — status stuck on 'playing' forever with
+  // no audio and no error surfaced anywhere.
   if (ensurePromise && ensureSessionId === sessionId) {
     return ensurePromise;
   }
@@ -183,11 +192,12 @@ export async function ensureOffscreenReady(sessionId, rate, startIndex) {
 
   try {
     await ensurePromise;
-  } catch (err) {
-    // A failed attempt must not be cached; let the next caller retry.
+  } finally {
+    // Always clear, success or failure — see the comment above the guard.
+    // The next call (even for the same sessionId) must re-verify
+    // hasDocument() rather than trust this result forever.
     ensurePromise = null;
     ensureSessionId = null;
-    throw err;
   }
 }
 

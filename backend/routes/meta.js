@@ -18,7 +18,7 @@ router.get('/health', (req, res) => {
   res.status(200).json({
     ok: true,
     mock: isMockMode(),
-    model: 'bulbul:v3',
+    model: config.sarvamTtsModel,
     version: SERVICE_VERSION,
     uptime_s: Math.round((Date.now() - startedAt) / 1000),
     has_api_key: !!config.sarvamApiKey,

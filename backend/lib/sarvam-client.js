@@ -1,15 +1,13 @@
 /**
  * backend/lib/sarvam-client.js
  *
- * Thin wrapper around the Sarvam Bulbul v3 TTS endpoint. Exact request
+ * Thin wrapper around the Sarvam Bulbul TTS endpoint. Exact request
  * shape per shared_contracts §8 — never send pitch/loudness/
- * enable_preprocessing, they are unsupported on v3.
+ * enable_preprocessing, they are unsupported on v3/v4.
  */
 
 import { config } from '../config.js';
 import { ERRORS } from './errors.js';
-
-const UPSTREAM_URL = 'https://api.sarvam.ai/text-to-speech';
 
 /**
  * @param {{text:string, language_code:string, speaker:string, pace:number,
@@ -27,7 +25,7 @@ export async function synthesizeUpstream(params) {
 
   let res;
   try {
-    res = await fetch(UPSTREAM_URL, {
+    res = await fetch(`${config.sarvamTtsBaseUrl}/text-to-speech`, {
       method: 'POST',
       headers: {
         'api-subscription-key': config.sarvamApiKey,
@@ -36,7 +34,7 @@ export async function synthesizeUpstream(params) {
       body: JSON.stringify({
         text,
         language_code,
-        model: 'bulbul:v3',
+        model: config.sarvamTtsModel,
         speaker,
         pace,
         temperature,

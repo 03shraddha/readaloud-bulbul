@@ -192,7 +192,51 @@ function buildBodyUnits(richTextEl, statusId, languageCode) {
       ordinal++;
     }
   }
-  return units;
+
+  if (units.length) return units;
+
+  // Belt-and-suspenders: the block-by-block walk above depends entirely on
+  // X's undocumented, testid-based internal DOM shape for an Article body
+  // (see the file header -- "confirmed by direct DOM inspection", not a
+  // published contract). If that shape has drifted since and the walk above
+  // comes back with nothing -- e.g. descendToBranchPoint() landed on the
+  // wrong level, or a redesign changed how blocks are wrapped -- the session
+  // is left with only the title unit, gets marked exhausted (twitter.js's
+  // extract() sets `exhausted: !!article` unconditionally once ANY article
+  // units come back), and playback stops dead after one sentence with no
+  // error surfaced anywhere.
+  //
+  // Degrade to walking richTextEl's own top-level children as blocks,
+  // bypassing the specific articleRichTextComponent/longformRichTextComponent
+  // selector this time (that's exactly what just failed to match). This
+  // still keeps each paragraph/heading as its own unit -- critical because a
+  // heading like "Be outcome-oriented" has no terminating punctuation, and
+  // buildRawTextAndMap() only inserts a plain space (never a sentence break)
+  // between text nodes. Collapsing the whole body into ONE unit would glue
+  // every heading straight onto the paragraph that follows it, producing
+  // "sentences" that span multiple paragraphs -- long enough to blow past
+  // the backend's per-request character limit, which gets them silently
+  // skipped as unvoiceable. That reproduces the exact same "stops after the
+  // title" symptom this fallback exists to fix, just one layer removed.
+  const fallbackRoot = descendToBranchPoint(richTextEl);
+  const fallbackBlocks = fallbackRoot.children.length ? Array.from(fallbackRoot.children) : [fallbackRoot];
+  const fallbackUnits = [];
+  let fallbackOrdinal = 1;
+  for (const block of fallbackBlocks) {
+    const unit = buildTextBlockUnit(block, `article:${statusId}:fb${fallbackOrdinal}`, languageCode);
+    if (unit) {
+      fallbackUnits.push(unit);
+      fallbackOrdinal++;
+    }
+  }
+  if (fallbackUnits.length) return fallbackUnits;
+
+  // Last resort: even a top-level-children walk found nothing to split on
+  // (richTextEl is effectively one flat run of text). One oversized unit
+  // that might get skipped is still better than a session with zero body
+  // content at all.
+  const wholeBodyUnit = buildTextBlockUnit(richTextEl, `article:${statusId}:body`, languageCode);
+  return wholeBodyUnit ? [wholeBodyUnit] : [];
 }
 
 /**

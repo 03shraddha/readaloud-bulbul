@@ -22,6 +22,17 @@ import * as offscreenManager from './offscreen-manager.js';
 
 const log = createLogger('background:sw');
 
+/** Attempts (with delay between each) to reach a just-injected content
+ * script before giving up. See activateTab()'s doc comment for why more
+ * than one immediate retry is needed. */
+const POST_INJECT_RETRY_ATTEMPTS = 5;
+const POST_INJECT_RETRY_DELAY_MS = 100;
+
+/** @param {number} ms @returns {Promise<void>} */
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Warm the settings cache immediately; session.js/prefetch-queue.js read it
 // synchronously afterwards.
 persistence.loadSettingsCache();
@@ -146,7 +157,21 @@ chrome.runtime.onMessage.addListener(handleMessage);
 /**
  * Sends ACTIVATE to `tabId`, reserving a fresh sessionId first. If the
  * content script hasn't been injected yet (fresh install, or a page that
- * loaded before the extension did), injects the loader and retries once.
+ * loaded before the extension did), injects the loader and retries.
+ *
+ * `chrome.scripting.executeScript()`'s promise resolves once loader.js's
+ * synchronous IIFE finishes running -- but loader.js (src/content/loader.js)
+ * does nothing more than kick off `import(mainUrl)` and return immediately;
+ * it never awaits it. The actual `chrome.runtime.onMessage` listener is only
+ * registered once that dynamically-imported main.js module has finished
+ * being fetched/evaluated and its boot() has run -- which is inherently
+ * asynchronous (a real network/cache fetch of an ES module graph, not a
+ * same-tick continuation). A single immediate sendMessage() right after
+ * executeScript() resolves races that import and reliably loses on a cold
+ * module cache, throwing "Could not establish connection. Receiving end
+ * does not exist." even though injection genuinely succeeded and the
+ * listener shows up moments later. Retrying a few times with a short delay
+ * gives that import the room it needs instead of giving up on the first miss.
  * @param {number} tabId
  */
 async function activateTab(tabId) {
@@ -165,11 +190,25 @@ async function activateTab(tabId) {
       target: { tabId },
       files: ['src/content/loader.js'],
     });
-    await chrome.tabs.sendMessage(tabId, envelope);
-  } catch (retryErr) {
-    log.error('failed to activate tab after injecting loader', retryErr);
+  } catch (injectErr) {
+    log.error('failed to inject loader', injectErr);
     session.abortPendingSession(sessionId);
+    return;
   }
+
+  let lastErr = null;
+  for (let attempt = 1; attempt <= POST_INJECT_RETRY_ATTEMPTS; attempt++) {
+    try {
+      await chrome.tabs.sendMessage(tabId, envelope);
+      return;
+    } catch (retryErr) {
+      lastErr = retryErr;
+      if (attempt < POST_INJECT_RETRY_ATTEMPTS) await delay(POST_INJECT_RETRY_DELAY_MS);
+    }
+  }
+
+  log.error('failed to activate tab after injecting loader', lastErr);
+  session.abortPendingSession(sessionId);
 }
 
 chrome.action.onClicked.addListener((tab) => {

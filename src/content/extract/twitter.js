@@ -69,16 +69,21 @@ function matches(location) {
  */
 async function init(ctx) {
   state.log = ctx?.log || console;
-  // Foundation's ACTIVATE handler may hand us `{}` today (see content/main.js
-  // comment "background owns settings; extractor.init gets what it needs
-  // later"); default to the documented ra.settings defaults (shared_contracts
-  // §7) so behavior is sane even before that wiring is complete.
-  state.settings = {
-    skipPromoted: true,
-    announceRetweets: true,
-    autoScroll: true,
-    ...(ctx?.settings || {}),
-  };
+  // content/main.js hands us its own `currentSettings` object and mutates it
+  // IN PLACE (via watchSettings()) whenever the widget's settings popover
+  // changes something, so the toggles keep working mid-session -- but only
+  // for whoever kept a reference to that same object (see article.js's
+  // `this._settings`). Spreading it into a brand-new object here, like this
+  // used to do, breaks that link: state.settings would be a one-time
+  // snapshot, and toggling Auto-scroll/Skip promoted/Announce retweets after
+  // a session already started would silently do nothing until the next
+  // ACTIVATE. Filling in defaults on the SAME object (rather than building a
+  // new one) keeps state.settings === ctx.settings, so live updates apply.
+  const settings = ctx?.settings || {};
+  if (settings.skipPromoted === undefined) settings.skipPromoted = true;
+  if (settings.announceRetweets === undefined) settings.announceRetweets = true;
+  if (settings.autoScroll === undefined) settings.autoScroll = true;
+  state.settings = settings;
   state.feeder = createTimelineFeeder({ log: state.log });
   state.feeder.init();
 }
