@@ -164,10 +164,15 @@ function buildTextViaTreeWalker(node) {
  * 2. Catch-all textContent for deeply nested or complex styled elements
  * 3. TreeWalker-based extraction for edge cases where recursion misses text
  *
+ * Exported (rather than kept module-local) so lib/x-text-anchor.js can mirror
+ * the same link/emoji rules when it rebuilds this same text from the live DOM
+ * at highlight time -- the two need to agree, or the fingerprint search there
+ * fails. See that module's doc comment for why it re-derives a TRACKED
+ * version of this instead of calling this function directly.
  * @param {Element} node
  * @returns {string}
  */
-function buildTextFromNode(node) {
+export function buildTextFromNode(node) {
   if (!node) return '';
 
   let out = '';

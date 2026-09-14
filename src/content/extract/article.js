@@ -34,6 +34,75 @@ const HEADING_RE = /^H[1-6]$/;
 const REVEAL_STEP_WAIT_MS = 120;
 const REVEAL_MAX_STEPS = 30;
 
+// Minimum fraction of the container's raw text that must have made it into
+// spoken sentences before extract() accepts the result as-is, instead of
+// running revealLazyContent() and re-extracting once. This is deliberately
+// well below 1.0: normalizeForSpeech legitimately shortens text (URLs
+// stripped, whitespace collapsed) and buildUnits() legitimately strips real
+// in-container chrome (a stray NAV/FOOTER widget, a <header> that turned out
+// to be page-level -- see shouldStripElement()), so SOME shrinkage on every
+// normal page is expected and must not falsely trigger a reveal pass. 0.5
+// was chosen because those combined, ordinary losses rarely account for
+// anywhere near half of a real article's raw text; falling below that is a
+// much stronger signal that a large fraction of the container was actually
+// invisible at extraction time (e.g. behind a scroll-gated fade-in), the
+// partial version of the all-or-nothing bug this constant generalizes.
+const REVEAL_MIN_EXTRACTION_RATIO = 0.5;
+
+// Below this many raw characters, ratio-based comparisons are too noisy to
+// trust (a couple of stripped words can swing the ratio wildly) and there's
+// too little content for a missed chunk to matter much anyway -- matches
+// the threshold the original all-or-nothing check already used.
+const REVEAL_MIN_CONTAINER_CHARS = 200;
+
+// Text-length gate for classifying a <div> as a paragraph (see the DIV
+// branch of classifyElement() below). The old value (30) dropped short
+// div-based headings, one-line paragraphs, and pull-quotes on div-based
+// platforms -- Substack and Medium build paragraphs out of <div>, not <p>
+// (see docs/SUBSTACK_FIX.md). Lowered to 10: everything actually observed
+// under that length is pure UI chrome text -- icon-only divs, single-word
+// badges/labels ("New", "Menu", "3"), close-button glyphs -- while anything
+// genuinely authored (a short pull-quote, a one-line dek) tends to run at
+// least a few words, comfortably over 10 characters.
+const DIV_PARAGRAPH_MIN_CHARS = 10;
+
+// Tags/classes that make an element classify as a unit in classifyElement()
+// below, used ONLY by hasClassifyingDescendant() to answer "does this DIV's
+// subtree contain something that must stay its own unit". Deliberately NOT
+// a 1:1 mirror of classifyElement(): it leaves out the DIV-as-paragraph case
+// itself (checking that recursively is exactly the O(n^2) blow-up this
+// selector-based approach exists to avoid -- see hasClassifyingDescendant()),
+// and it can only exact-token-match the code-highlighter classes
+// isCodeBlock() also accepts via a prefix (`language-*`, `highlighter-*`,
+// `syntax-highlight*`) -- a CSS class selector matches a whole token, not a
+// prefix within one. That's an accepted, narrow miss (the same failure this
+// file already had for those specific prefix-class cases, not a new one),
+// not a regression for the PRE/TABLE/list/heading shapes this constant is
+// here to fix.
+const CLASSIFIABLE_DESCENDANT_SELECTOR = [
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'p',
+  'li',
+  'blockquote',
+  'figcaption',
+  'caption',
+  'table',
+  'pre',
+  'dt',
+  'dd',
+  'summary',
+  'address',
+  '.highlight',
+  '.codehilite',
+  '.hljs',
+  '.prettyprint',
+].join(', ');
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
@@ -52,8 +121,12 @@ function sleep(ms) {
  * scroll page can't hang activation), then restores the original scroll
  * position -- the reveal itself is what matters, not where the user ends
  * up looking. Only called as a fallback when the normal extraction pass
- * already came back empty despite the container clearly having real
- * text, so pages that don't need this pay nothing for it.
+ * came back short of `REVEAL_MIN_EXTRACTION_RATIO` despite the container
+ * clearly having real text (see extract()'s ratio check, which covers both
+ * the all-or-nothing case -- zero units -- AND the partial case: a page
+ * whose first couple of paragraphs render immediately while the rest sit
+ * behind the same scroll-gated fade never hits zero units, so it needs
+ * this too), so pages that don't need this pay nothing for it.
  * @returns {Promise<void>}
  */
 async function revealLazyContent() {
@@ -75,6 +148,47 @@ async function revealLazyContent() {
 }
 
 /**
+ * Answers "does this DIV's subtree contain something that must stay its own
+ * unit", for the DIV branch of classifyElement() below. Checks the WHOLE
+ * subtree, not just direct children: a one-level-only check let
+ * `<div><div><pre>...50 lines...</pre></div></div>` through, because the
+ * INNER div's own check (its only child, PRE, classifies) correctly
+ * declined to self-classify, but the OUTER div only ever looked at that
+ * inner div -- itself a non-classifying DIV as far as a shallow check is
+ * concerned -- and claimed the whole subtree as one paragraph, reading the
+ * code block character-by-character instead of summarizing it. The same
+ * shape drops a `<div><figure><table>...</table></figure></div>` (every
+ * cell read as prose) and merges every `<li>` in a `<div><ul>...</ul></div>`
+ * into one unit.
+ *
+ * Uses a single native `querySelector` call rather than a recursive
+ * `classifyElement` walk over every descendant: the latter is O(n^2) on
+ * deep div soup (each level would re-walk everything below it), while one
+ * `querySelector` call per DIV is native, well-optimized, and does far less
+ * work per node than reimplementing classifyElement's own checks (text
+ * length, table/code-block detection) at every level.
+ * @param {Element} el
+ * @returns {boolean}
+ */
+function hasClassifyingDescendant(el) {
+  try {
+    if (typeof el.querySelector === 'function') {
+      return !!el.querySelector(CLASSIFIABLE_DESCENDANT_SELECTOR);
+    }
+  } catch {
+    // fall through to the defensive fallback below
+  }
+  // Only reached if querySelector is missing/throws -- shouldn't happen on
+  // a real DOM element. Degrades to the old one-level check rather than a
+  // full recursive walk, so this rare fallback can't reintroduce the O(n^2)
+  // cost the querySelector path above exists to avoid.
+  for (const child of el.children || []) {
+    if (child.nodeType === Node.ELEMENT_NODE && classifyElement(child)) return true;
+  }
+  return false;
+}
+
+/**
  * @param {Element} el
  * @returns {import('../../shared/types.js').ReadUnit['kind']|null}
  */
@@ -86,6 +200,14 @@ function classifyElement(el) {
   if (tag === 'LI') return 'list-item';
   if (tag === 'BLOCKQUOTE') return 'quote';
   if (tag === 'FIGCAPTION' || tag === 'CAPTION') return 'caption';
+  // DT/DD/SUMMARY/ADDRESS were in no branch at all, so a <dl> (a definition
+  // list) or a <details>/<summary> disclosure widget or postal/contact
+  // <address> block sitting directly under the content root was dropped
+  // entirely -- buildUnits() never had a kind for them to classify as, so
+  // it fell straight through to "not a unit" and skipped them. DT/SUMMARY
+  // read like a short heading-style label; DD/ADDRESS read like prose.
+  if (tag === 'DT' || tag === 'SUMMARY') return 'heading';
+  if (tag === 'DD' || tag === 'ADDRESS') return 'paragraph';
   if (isTable(el)) return 'table-summary';
   if (isCodeBlock(el)) return 'code-summary';
   // Images are deliberately never classified/read -- announcing "image
@@ -95,20 +217,14 @@ function classifyElement(el) {
   // actually wrote, unlike alt text, which is frequently absent, generic,
   // or auto-generated.
 
-  // Substack, Medium, and other platforms use <div> elements for paragraphs.
-  // Classify as paragraph if it's a div with meaningful text and no block children.
+  // Substack, Medium, and other platforms use <div> elements for
+  // paragraphs. Classify as a paragraph if it's a div with meaningful text
+  // and nothing classifiable anywhere in its subtree -- see
+  // hasClassifyingDescendant()'s comment for why this must be a subtree-wide
+  // check, not a one-level one.
   if (tag === 'DIV') {
     const text = (el.textContent || '').trim();
-    if (text.length > 30) {
-      // Check if it has any block-level child elements that would be classified as units.
-      // If it does, let those children be extracted instead of treating this div as a unit.
-      for (const child of el.children) {
-        if (child.nodeType === Node.ELEMENT_NODE) {
-          const childKind = classifyElement(child);
-          if (childKind) return null; // has structured children; don't classify parent
-        }
-      }
-      // No classified children; treat as a paragraph div
+    if (text.length > DIV_PARAGRAPH_MIN_CHARS && !hasClassifyingDescendant(el)) {
       return 'paragraph';
     }
   }
@@ -218,7 +334,7 @@ function buildUnits(container, languageCode) {
 
   const shouldDescend = (el) => {
     if (el === container) return true;
-    if (shouldStripElement(el)) return false;
+    if (shouldStripElement(el, container)) return false;
     return classifyElement(el) === null;
   };
 
@@ -227,7 +343,7 @@ function buildUnits(container, languageCode) {
     if (node === container) continue;
 
     const el = /** @type {Element} */ (node);
-    if (shouldStripElement(el)) continue;
+    if (shouldStripElement(el, container)) continue;
 
     const kind = classifyElement(el);
     if (!kind) continue;
@@ -259,7 +375,7 @@ function buildUnits(container, languageCode) {
     // Degrade gracefully for markup that doesn't use any recognized
     // block tags at all (plain-text-ish pages): read the whole container
     // as a single paragraph-kind unit, still respecting strip rules.
-    const fallbackShouldDescend = (el) => !shouldStripElement(el);
+    const fallbackShouldDescend = (el) => !shouldStripElement(el, container);
     const fallbackUnit = buildTextUnit('u1', 'paragraph', container, languageCode, {
       shouldDescend: fallbackShouldDescend,
     });
@@ -335,7 +451,7 @@ function pickTitle() {
 
 /**
  * @param {import('../../shared/types.js').Sentence} sentence
- * @returns {Node|null}
+ * @returns {Node|Range|null}
  */
 function getScrollTarget(sentence) {
   const locator = sentence && sentence.locator;
@@ -344,6 +460,16 @@ function getScrollTarget(sentence) {
   if (locator.kind === 'element') {
     return locator.element || null;
   }
+
+  // Scroll to the sentence's own range, not its whole containing paragraph:
+  // a paragraph (or, via buildUnits()'s whole-container fallback, the
+  // entire article) is routinely taller than the viewport, and handing that
+  // to scrollIntoViewSmart as a "normal" target used to force it to fully
+  // contain something it structurally never could (see scroll.js's file
+  // header). Fall back to the parent element only when the range itself
+  // doesn't resolve (detached nodes, stale locator).
+  const range = resolveLocatorToRange(locator, sentence.text);
+  if (range) return range;
 
   const node = locator.startNode || locator.containerRef;
   if (!node) return null;
@@ -411,9 +537,23 @@ const articleExtractor = {
       let { units, sentenceTexts } = buildUnits(container, languageCode);
 
       // Signature of scroll-gated lazy content (see revealLazyContent()):
-      // the container has substantial real text but produced zero units,
-      // meaning everything in it was invisible at extraction time.
-      if (units.length === 0 && (container.textContent || '').trim().length > 200) {
+      // the container has substantial real text but only a small fraction
+      // of it made it into spoken sentences, meaning much of it was
+      // invisible at extraction time. units.length === 0 (the old,
+      // all-or-nothing check) is just the ratio === 0 special case of this
+      // same signature -- a page where the first two paragraphs render
+      // immediately and the rest sit behind a scroll-gated fade produces a
+      // handful of units, never zero, and used to silently drop everything
+      // after them with no error and no toast. Computed and compared ONCE,
+      // so revealLazyContent() (and the re-extraction after it) can only
+      // ever run a single time per extract() call -- never twice, and
+      // `units`/`sentenceTexts` are REPLACED, not appended to, so nothing
+      // is double-counted if the second pass finds the same visible units
+      // the first pass already found.
+      const containerTextLength = (container.textContent || '').trim().length;
+      const extractedTextLength = sentenceTexts.reduce((sum, s) => sum + ((s && s.text) || '').length, 0);
+      const extractionRatio = containerTextLength > 0 ? extractedTextLength / containerTextLength : 1;
+      if (containerTextLength > REVEAL_MIN_CONTAINER_CHARS && extractionRatio < REVEAL_MIN_EXTRACTION_RATIO) {
         await revealLazyContent();
         ({ units, sentenceTexts } = buildUnits(container, languageCode));
       }
@@ -435,6 +575,24 @@ const articleExtractor = {
       if (titleEl && !container.contains(titleEl)) {
         const titleUnit = buildUnitForElement(titleEl, 'heading', 0, languageCode);
         if (titleUnit && titleUnit.sentences.length) {
+          // Mirrors x-article-parser.js's buildTitleUnit(): this title is
+          // prepended precisely because it sits OUTSIDE `container` (see
+          // the comment above), typically right at the top of the page.
+          // ensureVisible()'s default 'center' block would scroll DOWN away
+          // from an <h1> already at the top of the viewport the moment
+          // reading starts -- a jarring, unnecessary move. 'start'/'auto'
+          // anchor it to the top instead, as an instant jump rather than an
+          // animated scroll, so no late-loading content above it (a hero
+          // image, an ad) gets a window to shift layout mid-flight. Set
+          // directly on each sentence's own locator -- ensureVisible()
+          // already reads `locator.scrollBlock`/`scrollBehavior` off
+          // whatever locator getScrollTarget() resolved, unchanged here.
+          for (const s of titleUnit.sentences) {
+            if (s.locator) {
+              s.locator.scrollBlock = 'start';
+              s.locator.scrollBehavior = 'auto';
+            }
+          }
           units.unshift(titleUnit);
           sentenceTexts.unshift(...titleUnit.sentences.map((s) => ({ text: s.text })));
         }
@@ -510,7 +668,16 @@ const articleExtractor = {
 
       // No-ops when the target is already comfortably on screen, instead of
       // re-centering on every single sentence -- see lib/scroll.js.
-      scrollIntoViewSmart(target, { behavior: 'smooth', block: 'center' });
+      // `locator.scrollBlock`/`scrollBehavior` let a specific locator (e.g.
+      // a title unit sitting right at the top of the page) override the
+      // defaults, exactly as x-article-parser.js's ensureArticleVisible()
+      // does -- centering an element already at the top would actively
+      // scroll DOWN away from it.
+      const locator = sentence && sentence.locator;
+      scrollIntoViewSmart(target, {
+        behavior: (locator && locator.scrollBehavior) || 'smooth',
+        block: (locator && locator.scrollBlock) || 'center',
+      });
       return true;
     } catch (err) {
       log.error('ensureVisible failed', err);

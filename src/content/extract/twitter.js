@@ -30,6 +30,7 @@ import { X_AUTOSCROLL_STEP_PX, X_AUTOSCROLL_MIN_INTERVAL_MS } from '../../shared
 import { SELECTORS, querySelector, queryAll } from './lib/x-selectors.js';
 import { extractStatusId } from './lib/x-tweet-parser.js';
 import { groupTweetsIntoUnits } from './lib/x-thread-grouper.js';
+import { findRangeForSentence } from './lib/x-text-anchor.js';
 import { createTimelineFeeder } from './lib/x-timeline-feeder.js';
 import {
   extractArticleUnits,
@@ -46,6 +47,26 @@ const ENSURE_VISIBLE_SEARCH_ATTEMPTS = 3;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+/**
+ * A status permalink page: `/<user>/status/<id>`, `/i/status/<id>`, or
+ * either of those with a trailing media-viewer segment (e.g.
+ * `/<user>/status/<id>/photo/1`). Same pathname shape
+ * lib/x-article-parser.js's module-local `statusIdFromLocation()` matches
+ * against `location.pathname` -- duplicated here rather than imported
+ * because that helper isn't exported from a file this task doesn't own.
+ *
+ * A permalink's content is finite: the focal tweet plus whatever replies
+ * are already mounted below it. Unlike an ordinary timeline (where there's
+ * always more to scroll to), there is nothing more X will ever load here
+ * that the reader asked for -- see extract()'s `exhausted` comment for what
+ * goes wrong when a finite page is treated as if it weren't.
+ * @param {string} pathname
+ * @returns {boolean}
+ */
+export function isStatusPermalinkPathname(pathname) {
+  return /^\/(?:i|[^/]+)\/status\/(\d+)/.test(pathname || '');
 }
 
 /** Module-local state; only one twitter session is ever active per page. */
@@ -128,6 +149,8 @@ async function extract() {
     units = [...article.units, ...units];
   }
 
+  const isPermalink = isStatusPermalinkPathname(location.pathname);
+
   return {
     units,
     contentKey: twitterContentKey(location),
@@ -145,7 +168,18 @@ async function extract() {
     // blindly scrolling the page down hunting for `article[data-testid=
     // "tweet"]` elements that were never going to be there -- exactly the
     // unwanted downward auto-scroll reported after clicking play.
-    exhausted: !!article,
+    //
+    // A plain status permalink (`/<user>/status/<id>`) has the identical
+    // problem and was NOT covered by the check above: its tweetData comes
+    // from the regular per-article path, not extractArticleUnits(), so
+    // `article` is null there and this used to fall through to `false`.
+    // The focal tweet plus whatever replies are already mounted is all a
+    // permalink page will ever show for a single-tweet read -- there's no
+    // "next batch" coming -- so the buffer running low there triggered the
+    // exact same blind downward scroll-hunt while the reader was still on
+    // the first sentence of that one tweet (the second, independent cause
+    // of the reported "page walking downward on its own" bug).
+    exhausted: !!article || isPermalink,
   };
 }
 
@@ -154,12 +188,14 @@ async function extract() {
  * @returns {Promise<import('../../shared/types.js').ExtractResult>}
  */
 async function extractMore(reason) {
-  // Belt-and-suspenders: extract()'s `exhausted: !!article` already stops
-  // the background from ever calling this for an Article session, but if
-  // that ever changes (a future resumed session, a code path we missed),
-  // never let the tweet-timeline feeder's scroll-hunt run against an
-  // Article page -- there is nothing it could find there.
-  if (querySelector(document, SELECTORS.articleReadView)) {
+  // Belt-and-suspenders: extract()'s `exhausted: !!article || isPermalink`
+  // already stops the background from ever calling this for an Article
+  // session or a status permalink, but if that ever changes (a future
+  // resumed session, a code path we missed), never let the tweet-timeline
+  // feeder's scroll-hunt run against either -- there is nothing more it
+  // could find on an Article page, and nothing more X will load for the
+  // reader on a permalink.
+  if (querySelector(document, SELECTORS.articleReadView) || isStatusPermalinkPathname(location.pathname)) {
     return {
       units: [],
       contentKey: twitterContentKey(location),
@@ -205,46 +241,6 @@ function findArticleByStatusId(statusId) {
 }
 
 /**
- * Finds a Range for `fingerprint` within `containerEl`'s live text, walking
- * text nodes fresh every call (never a stored node/range).
- * @param {Element|null} containerEl
- * @param {string} fingerprint
- * @returns {Range|null}
- */
-function findRangeForFingerprint(containerEl, fingerprint) {
-  if (!containerEl || !fingerprint || typeof document.createTreeWalker !== 'function') return null;
-  const needle = fingerprint.trim();
-  if (!needle) return null;
-
-  const walker = document.createTreeWalker(containerEl, NodeFilter.SHOW_TEXT);
-  let combined = '';
-  const nodeOffsets = [];
-  let node;
-  while ((node = walker.nextNode())) {
-    const start = combined.length;
-    combined += node.textContent;
-    nodeOffsets.push({ node, start, end: combined.length });
-  }
-
-  const idx = combined.indexOf(needle);
-  if (idx === -1) return null;
-  const endIdx = idx + needle.length;
-
-  const startInfo = nodeOffsets.find((n) => idx >= n.start && idx < n.end);
-  const endInfo = nodeOffsets.find((n) => endIdx > n.start && endIdx <= n.end);
-  if (!startInfo || !endInfo) return null;
-
-  try {
-    const range = document.createRange();
-    range.setStart(startInfo.node, idx - startInfo.start);
-    range.setEnd(endInfo.node, endIdx - endInfo.start);
-    return range;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * The §10 highlight protocol, step 2: sentence -> {kind, range|element} | null.
  * @param {import('../../shared/types.js').Sentence} sentence
  * @returns {Promise<{kind:'range', range: Range}|{kind:'element', element: Element}|null>}
@@ -287,7 +283,9 @@ async function resolveAnchor(sentence) {
       const nodes = queryAll(article, SELECTORS.tweetText);
       const quoteTextEl = nodes[1] || null;
       if (quoteTextEl) {
-        const range = findRangeForFingerprint(quoteTextEl, locator.textFingerprint);
+        const range = findRangeForSentence(quoteTextEl, locator.textFingerprint, {
+          ordinal: locator.sentenceOrdinal,
+        });
         // No precise range -> fall through to the widget's text-preview
         // fallback rather than highlighting the whole quote block: on a
         // short tweet that's a mild over-highlight, but on X's long-form
@@ -301,10 +299,41 @@ async function resolveAnchor(sentence) {
     default: {
       const textEl = querySelector(article, SELECTORS.tweetText);
       if (!textEl) return null;
-      const range = findRangeForFingerprint(textEl, locator.textFingerprint);
+      const range = findRangeForSentence(textEl, locator.textFingerprint, {
+        ordinal: locator.sentenceOrdinal,
+      });
       return range ? { kind: 'range', range } : null;
     }
   }
+}
+
+/**
+ * Guesses which way to scroll to find `targetStatusId`, using the feeder's
+ * emission order as a proxy for timeline position: tweets are emitted in
+ * the DOM order X mounts them in, so a status id emitted before every
+ * status id currently mounted was scrolled past already and sits ABOVE the
+ * viewport; anything else (emitted later, or never emitted / unknown) is
+ * treated as still ahead, i.e. BELOW. `feeder._emittedStatusIds` is a
+ * insertion-ordered Set built for tests/diagnostics, but its ordering is
+ * exactly the signal this needs, so it's read here as real logic too.
+ * @param {ReturnType<typeof createTimelineFeeder>|null} feeder
+ * @param {string} targetStatusId
+ * @returns {1|-1} scroll direction: 1 = down, -1 = up
+ */
+function inferHuntDirection(feeder, targetStatusId) {
+  if (!feeder) return 1;
+  const order = Array.from(feeder._emittedStatusIds);
+  const targetIndex = order.indexOf(targetStatusId);
+  if (targetIndex === -1) return 1; // never emitted -- best guess is still ahead
+
+  const mountedIndices = queryAll(document, SELECTORS.article)
+    .map((el) => extractStatusId(el)?.statusId)
+    .filter(Boolean)
+    .map((id) => order.indexOf(id))
+    .filter((i) => i !== -1);
+  if (!mountedIndices.length) return 1; // no mounted reference point to compare against
+
+  return targetIndex < Math.min(...mountedIndices) ? -1 : 1;
 }
 
 /**
@@ -323,14 +352,31 @@ async function ensureVisible(sentence) {
   let article = findArticleByStatusId(locator.statusId);
 
   if (!article && state.settings.autoScroll) {
+    // A tweet that scrolled out of a virtualized timeline can be ABOVE the
+    // viewport just as easily as below it (the user may have scrolled past
+    // it already), but this used to always hunt downward -- searching the
+    // wrong direction for a tweet that's actually above, moving the page
+    // 1800px for nothing, then giving up with the page left there. Guess
+    // the right direction first (inferHuntDirection), and if the hunt still
+    // comes up empty, put the scroll position back rather than stranding
+    // the reader somewhere they never asked to be.
+    const startScrollY = window.scrollY;
+    const direction = inferHuntDirection(state.feeder, locator.statusId);
     for (let attempt = 0; attempt < ENSURE_VISIBLE_SEARCH_ATTEMPTS && !article; attempt++) {
       try {
-        window.scrollBy({ top: X_AUTOSCROLL_STEP_PX, left: 0, behavior: 'auto' });
+        window.scrollBy({ top: direction * X_AUTOSCROLL_STEP_PX, left: 0, behavior: 'auto' });
       } catch {
         /* ignore */
       }
       await sleep(X_AUTOSCROLL_MIN_INTERVAL_MS);
       article = findArticleByStatusId(locator.statusId);
+    }
+    if (!article) {
+      try {
+        window.scrollTo({ top: startScrollY, left: 0, behavior: 'auto' });
+      } catch {
+        /* ignore */
+      }
     }
   }
 

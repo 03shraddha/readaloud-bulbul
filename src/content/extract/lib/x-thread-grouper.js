@@ -123,7 +123,13 @@ function buildUnit(unitId, kind, label, members, meta) {
         locator: {
           statusId: member.statusId,
           sentenceOrdinal: ordinal,
-          textFingerprint: text.slice(0, 48),
+          // The FULL normalized sentence text, not a 48-char prefix: a
+          // prefix collides on formulaic openings ("Breaking:", "Thread:",
+          // ...) shared by unrelated sentences, which sent
+          // findRangeForSentence() to the wrong spot. Sentences are already
+          // capped at MAX_SENTENCE_CHARS (900), so this stays small and
+          // JSON-safe over chrome.runtime.sendMessage.
+          textFingerprint: text,
           part: spec.part,
         },
       });

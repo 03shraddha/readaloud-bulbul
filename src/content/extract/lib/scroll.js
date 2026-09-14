@@ -19,6 +19,21 @@
  * animation, which visibly races ahead of the actual reading pace. Skipping
  * the call entirely when nothing needs to move is what keeps the page
  * settled in place until it genuinely needs to catch up.
+ *
+ * A second, related bug: "comfortably visible" used to mean "fully inside
+ * the viewport", which is impossible for any target taller than about 76%
+ * of the viewport (a long paragraph, an oversized tweet-card fallback, a
+ * whole-article fallback unit). Those targets could never be judged
+ * comfortable no matter where the page sat, so scrollIntoViewSmart fired on
+ * every sentence inside them -- and since `block:'center'` on something
+ * taller than the screen parks its midpoint at the viewport middle, the
+ * page kept jumping to a position that had nothing to do with where the
+ * reader was actually looking. isComfortablyInView() below has a dedicated
+ * branch for oversized targets: instead of asking "is all of it visible"
+ * (never true), it asks "is a useful part of it on screen" (often already
+ * true). And when an oversized target genuinely does need a scroll,
+ * centering it is meaningless -- its top edge is used instead so the reader
+ * lands where the new content actually starts.
  */
 
 // How long auto-scroll stays suspended after a detected manual gesture.
@@ -28,6 +43,18 @@ const MANUAL_SUSPEND_MS = 4000;
 // for it to be considered "comfortably" in view (used for block:'center'-ish
 // checks). Smaller values are stricter about centering.
 const COMFORT_MARGIN_RATIO = 0.12;
+
+// A target taller than this fraction of the viewport (i.e. taller than the
+// comfortable band `vh * (1 - 2 * COMFORT_MARGIN_RATIO)` leaves room for)
+// can never be fully contained no matter where the page scrolls -- so full
+// containment is the wrong test for it. See isOversizedRect().
+const OVERSIZED_HEIGHT_RATIO = 1 - 2 * COMFORT_MARGIN_RATIO;
+
+// Once a target is oversized, treat it as comfortable once this fraction of
+// the viewport is covered by its visible portion. Conservative on purpose:
+// the goal is only to stop re-scrolling while the thing being read is
+// plainly on screen, not to allow a target that's mostly scrolled past.
+const OVERSIZED_VISIBLE_RATIO = 0.7;
 
 let lastManualGestureAt = 0;
 let listenersAttached = false;
@@ -98,16 +125,43 @@ function getTargetRect(target) {
 
 /**
  * @param {DOMRect} rect
+ * @param {number} vh
+ * @returns {boolean} true when `rect` is taller than the comfortable band,
+ *   meaning it can never be fully contained in the viewport no matter where
+ *   the page scrolls.
+ */
+function isOversizedRect(rect, vh) {
+  return rect.height > vh * OVERSIZED_HEIGHT_RATIO;
+}
+
+/**
+ * @param {DOMRect} rect
  * @param {'start'|'center'|'end'|'nearest'} block
+ * @param {number} [viewportHeight] - injectable viewport height, for pure
+ *   unit testing; defaults to the real window when omitted.
  * @returns {boolean}
  */
-function isComfortablyInView(rect, block) {
-  const vh = window.innerHeight || document.documentElement.clientHeight;
+export function isComfortablyInView(rect, block, viewportHeight) {
+  const vh = viewportHeight || window.innerHeight || document.documentElement.clientHeight;
   if (!vh || !rect) return true;
   const margin = vh * COMFORT_MARGIN_RATIO;
 
   if (block === 'nearest') {
     return rect.top >= 0 && rect.bottom <= vh;
+  }
+
+  if (isOversizedRect(rect, vh)) {
+    // Full containment is structurally impossible here, so demanding it
+    // (the old behavior) meant this target could NEVER be judged
+    // comfortable, at any scroll position -- see the file header. Ask
+    // instead whether a useful part of it is already on screen: either it
+    // spans the whole viewport (top above, bottom below), or its visible
+    // slice covers a healthy fraction of the screen.
+    if (rect.top <= 0 && rect.bottom >= vh) return true;
+    const visibleTop = Math.max(rect.top, 0);
+    const visibleBottom = Math.min(rect.bottom, vh);
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+    return visibleHeight >= vh * OVERSIZED_VISIBLE_RATIO;
   }
 
   // Default / 'center' / 'start' / 'end' all use the same comfortable band:
@@ -140,10 +194,19 @@ export function scrollIntoViewSmart(target, opts = {}) {
     return false;
   }
 
+  // `block:'center'` on a target taller than the viewport is meaningless --
+  // it parks the target's midpoint at the viewport middle, which for an
+  // oversized element puts its top edge off-screen above the fold no matter
+  // how the scroll lands. Land on its top edge instead, so a scroll that IS
+  // needed moves to where the new content actually starts. Doesn't touch an
+  // explicit 'start'/'end'/'nearest' request.
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  const effectiveBlock = block !== 'nearest' && vh && isOversizedRect(rect, vh) ? 'start' : block;
+
   try {
     if (typeof target.scrollIntoView === 'function') {
       // Element (and, in supporting browsers, Range) both implement this.
-      target.scrollIntoView({ behavior, block, inline: 'nearest' });
+      target.scrollIntoView({ behavior, block: effectiveBlock, inline: 'nearest' });
       return true;
     }
   } catch {
@@ -154,10 +217,9 @@ export function scrollIntoViewSmart(target, opts = {}) {
   // window.scrollBy, which works for both Element and Range targets when
   // scrollIntoView isn't available/throws (older engines, some Range cases).
   try {
-    const vh = window.innerHeight || document.documentElement.clientHeight;
     let targetTop;
-    if (block === 'start') targetTop = 0;
-    else if (block === 'end') targetTop = vh - rect.height;
+    if (effectiveBlock === 'start') targetTop = 0;
+    else if (effectiveBlock === 'end') targetTop = vh - rect.height;
     else targetTop = vh / 2 - rect.height / 2; // center / nearest fallback
 
     const delta = rect.top - targetTop;

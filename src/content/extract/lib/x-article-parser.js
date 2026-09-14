@@ -329,14 +329,30 @@ export function resolveArticleAnchor(locator, expectedText) {
 
 /**
  * @param {object} locator - a sentence.locator with `articleView: true`
+ * @param {string} [expectedText] - the sentence's own text, threaded through
+ *   to resolveArticleAnchor() to catch a drifted index-path re-resolution.
+ *   Optional so the current caller (twitter.js's ensureVisible(), which this
+ *   file does not own) keeps working unchanged if it never passes it.
  * @returns {boolean}
  */
-export function ensureArticleVisible(locator) {
+export function ensureArticleVisible(locator, expectedText) {
   if (!locator) return false;
   if (!querySelector(document, SELECTORS.articleReadView)) return false; // navigated away
 
+  // Scroll to the actual sentence range, not the whole paragraph block --
+  // X Article paragraphs are routinely taller than the viewport, and
+  // handing scrollIntoViewSmart the whole block as the "small" case used to
+  // force it to fully contain something it never could (see scroll.js's
+  // file header). resolveArticleAnchor() is the same range resolution
+  // resolveAnchor() uses elsewhere in this module; fall back to the parent
+  // element only when the range itself doesn't resolve.
+  const anchor = locator.kind === 'element' ? null : resolveArticleAnchor(locator, expectedText);
   const target =
-    locator.kind === 'element' ? locator.element : locator.startNode?.parentElement || locator.containerRef;
+    anchor?.kind === 'range'
+      ? anchor.range
+      : locator.kind === 'element'
+        ? locator.element
+        : locator.startNode?.parentElement || locator.containerRef;
   if (!target) return false;
 
   // No-ops when already comfortably on screen -- an Article body reads

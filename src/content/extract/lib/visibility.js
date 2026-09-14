@@ -86,7 +86,30 @@ export function isElementVisible(el) {
   }
 
   const rect = safeBoundingRect(el);
-  if (rect && rect.width === 0 && rect.height === 0) return false;
+  if (rect && rect.width === 0 && rect.height === 0) {
+    // `display: contents` removes the element's own generated box entirely
+    // (by spec) while its children still render normally in its place --
+    // confirmed live, Chrome always reports a 0x0 getBoundingClientRect for
+    // such an element. `isVisible` climbs ancestors calling this function
+    // at every step, so without this carve-out ANY element using
+    // `display: contents` (a common modern design-system wrapper pattern)
+    // would falsely hide its entire visible subtree from both scoring and
+    // extraction -- and unlike lazy-loaded content, nothing here ever
+    // changes on scroll/mutation for revealLazyContent() to fix.
+    // Reuse the already-computed `style` (no second getComputedStyle call
+    // on this hot, per-node path); `getClientRects()` is a secondary
+    // signal for the same underlying cause (a display:contents element
+    // also reports zero client rects) so an element that DOES have client
+    // rects despite a 0x0 bounding rect is clearly still rendering
+    // something and must not be rejected either.
+    let isPassThrough = false;
+    try {
+      isPassThrough = (style && style.display === 'contents') || (typeof el.getClientRects === 'function' && el.getClientRects().length > 0);
+    } catch {
+      isPassThrough = false;
+    }
+    if (!isPassThrough) return false;
+  }
 
   const classAndId = `${el.id || ''} ${typeof el.className === 'string' ? el.className : ''}`.trim();
   if (classAndId && VISUALLY_HIDDEN_CLASS_RE.test(classAndId)) return false;

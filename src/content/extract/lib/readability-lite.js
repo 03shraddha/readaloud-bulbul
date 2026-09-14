@@ -33,7 +33,9 @@ const CANDIDATE_SELECTOR = [
   '.post-body',
 ].join(', ');
 
-const STRIP_TAGS = new Set(['NAV', 'HEADER', 'FOOTER', 'ASIDE', 'FORM', 'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
+// HEADER is deliberately NOT in this unconditional set -- see the
+// container-aware check in shouldStripElement() below for why.
+const STRIP_TAGS = new Set(['NAV', 'FOOTER', 'ASIDE', 'FORM', 'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
 
 // NOTE: IFRAME is deliberately NOT in this list. dom-walk.js already
 // descends into same-origin iframes and hard-skips cross-origin ones (the
@@ -54,12 +56,41 @@ const STRIP_CLASS_ID_RE =
   /\b(ad|ads|advert(?:isement)?s?|sponsor(?:ed)?|promo(?:tion)?s?|social[-_]?share|share[-_]?bar|comments?|related[-_]?(?:posts?|articles?)|sidebar|newsletter(?!-(?:post|body|content|article)\b)|cookie[-_]?(?:banner|notice|consent)|popup|modal|site[-_]?header|site[-_]?footer|masthead|breadcrumbs?|pagination|nav(?:bar|igation)?|menu|widget|skip[-_]?link|subscribe|paywall)\b/i;
 
 /**
+ * `shouldStripElement` is called from two different moments with two
+ * different notions of "the container": during candidate SCORING (before
+ * any root has been chosen -- see `scoreContainer` below) the container is
+ * whichever candidate is currently being walked; during actual UNIT
+ * EXTRACTION (`buildUnits` in article.js, after `findBestContainer` has
+ * already picked a winner) the container is that winner. Both callers pass
+ * the same value they're already walking, so a `<header>` visited during
+ * either pass is, by construction, always inside the container relevant to
+ * that pass -- there's no separate "not chosen yet" state to special-case.
+ *
  * @param {Element} el
+ * @param {Element} [container] - the container this call is scoring or
+ *   extracting from. Only consulted for `<header>` (see below); every other
+ *   stripped tag/role/class is page chrome regardless of nesting.
  * @returns {boolean} true if this element (and everything under it) should
  *   be excluded from scoring and unit extraction.
  */
-export function shouldStripElement(el) {
+export function shouldStripElement(el, container) {
   if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+
+  if (el.tagName === 'HEADER') {
+    // WordPress/Ghost/Hugo themes put the post title, dek/standfirst, and
+    // byline inside <header class="entry-header"> INSIDE the article --
+    // confirmed live, stripping HEADER unconditionally (the old behavior)
+    // made all of that invisible to both scoring and extraction, the
+    // single broadest content-loss rule in this file. A <header> is only
+    // page chrome (site masthead/nav wrapper) when it sits OUTSIDE the
+    // container currently being scored/extracted; a <header> the caller
+    // hasn't told us anything about (no `container` argument) is treated
+    // as chrome, matching the old, safer default.
+    if (container && typeof container.contains === 'function' && container.contains(el)) {
+      return false;
+    }
+    return true;
+  }
 
   if (STRIP_TAGS.has(el.tagName)) return true;
 
@@ -87,8 +118,6 @@ function isInsideLink(node, boundary) {
   return false;
 }
 
-const scoreShouldDescend = (el) => !shouldStripElement(el);
-
 /**
  * Weighted Readability-lite score for a single candidate container.
  * Higher is better; containers dominated by link text or with little prose
@@ -104,7 +133,14 @@ export function scoreContainer(el) {
   let paragraphCount = 0;
   let commaCount = 0;
 
-  for (const node of walkDOM(el, { shouldDescend: scoreShouldDescend })) {
+  // `el` IS the container for this pass -- walkDOM only ever visits `el`'s
+  // own descendants, so any <header> encountered here already sits inside
+  // the very candidate being scored (see shouldStripElement()'s doc
+  // comment). Defined per-call (not hoisted) so it closes over the right
+  // `el` when multiple candidates are scored in the same findBestContainer() pass.
+  const shouldDescend = (candidate) => !shouldStripElement(candidate, el);
+
+  for (const node of walkDOM(el, { shouldDescend })) {
     if (node.nodeType === Node.ELEMENT_NODE) {
       if (node.tagName === 'P') {
         const text = (node.textContent || '').trim();

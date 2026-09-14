@@ -65,6 +65,18 @@ export const DEFAULT_SPEAKER = 'shubh';
 export const X_AUTOSCROLL_STEP_PX = 600;
 export const X_AUTOSCROLL_MIN_INTERVAL_MS = 1200;
 export const X_MAX_UNITS_PER_BATCH = 25;
+// Upper bound on how far a single extractMore() scroll-hunt (see
+// x-timeline-feeder.js's extractMoreCore()) may move the page. That loop was
+// previously bounded only by the EXTRACT_MORE_TIMEOUT_MS wall clock, which on
+// a fast machine (short parse times, the low end of scrollStep()'s jitter)
+// fits roughly six 600px steps -- about 3600px, well over two viewport
+// heights of downward travel while the reader could still be on the first
+// sentence of the tweet on screen right now. Capping distance directly, not
+// just time, keeps a buffer-refill hunt from traveling that far regardless
+// of how fast the steps land. Three steps (matching
+// ENSURE_VISIBLE_SEARCH_ATTEMPTS's own bound in twitter.js) is enough room to
+// reveal fresh tweets without the trip itself becoming the disruption.
+export const X_EXTRACT_MORE_MAX_SCROLL_PX = 3 * X_AUTOSCROLL_STEP_PX;
 
 // --- Offscreen document ---
 export const OFFSCREEN_URL = 'src/offscreen/offscreen.html';

@@ -35,11 +35,48 @@
  */
 
 import { normalizeForSpeech } from '../../../shared/text/normalize.js';
-import { splitSentences } from '../../../shared/text/sentence-splitter.js';
+import { splitSentences, BLOCK_BOUNDARY_SENTINEL } from '../../../shared/text/sentence-splitter.js';
 import { walkDOM } from './dom-walk.js';
 import { isVisibleTextNode } from './visibility.js';
 
 const DEFAULT_SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
+
+// Elements whose boundary marks a real sentence break during the raw-text
+// walk (see buildRawTextAndMap / collectTextNodes below): crossing into a
+// different one of these from the previous visible text node's nearest
+// ancestor means the two text runs come from different blocks and must
+// never be fused into one sentence, no matter how much/little whitespace
+// separates them in the source. Without this, a heading with no terminal
+// punctuation ("Be outcome-oriented") glues straight onto the paragraph
+// that follows it, and every <li> in a list merges into one run-on
+// sentence -- see this file's header and the R5 task notes.
+const BLOCK_LEVEL_TAGS = new Set([
+  'P',
+  'DIV',
+  'LI',
+  'H1',
+  'H2',
+  'H3',
+  'H4',
+  'H5',
+  'H6',
+  'BLOCKQUOTE',
+  'SECTION',
+  'ARTICLE',
+  'TR',
+  'DT',
+  'DD',
+  'FIGCAPTION',
+  'PRE',
+  'UL',
+  'OL',
+  'TABLE',
+  'HEADER',
+  'FOOTER',
+  'ASIDE',
+  'MAIN',
+  'NAV',
+]);
 
 /**
  * @param {Element} el
@@ -50,9 +87,53 @@ function defaultShouldDescend(el) {
 }
 
 /**
+ * Climb from `startNode` up through `parentElement` (crossing out through a
+ * shadow-root `.host` the same way visibility.js's `isVisible` does) until
+ * hitting an element whose tag is in BLOCK_LEVEL_TAGS, or `container`
+ * itself. Two text nodes whose nearest block ancestor differs came from
+ * different blocks and must get a sentence boundary between them.
+ * @param {Node} startNode
+ * @param {Node} container
+ * @returns {Node} the nearest block-level ancestor, or `container` if none
+ *   was found before reaching it
+ */
+function nearestBlockAncestor(startNode, container) {
+  let current = startNode && startNode.nodeType === Node.ELEMENT_NODE ? startNode : startNode && startNode.parentElement;
+
+  while (current && current !== container) {
+    if (BLOCK_LEVEL_TAGS.has(/** @type {Element} */ (current).tagName)) return current;
+
+    const parentElement = /** @type {Element} */ (current).parentElement;
+    if (parentElement) {
+      current = parentElement;
+      continue;
+    }
+
+    const parentNode = current.parentNode;
+    current = parentNode && /** @type {ShadowRoot} */ (parentNode).host ? /** @type {ShadowRoot} */ (parentNode).host : null;
+  }
+
+  return container;
+}
+
+/**
+ * @typedef {{node: Text, boundaryBefore: boolean}} TextNodeEntry
+ */
+
+/**
+ * Walk `container`'s visible text nodes in DOM order, in lockstep computing
+ * whether each one needs a sentence boundary inserted immediately before it
+ * in the raw text: true when a `<br>` or a block-level element boundary
+ * (BLOCK_LEVEL_TAGS) separates it from the previous visible text node.
+ *
+ * This used to just return a flat `Text[]`, which threw away exactly the
+ * structural information buildRawTextAndMap now needs to decide where a
+ * real sentence break belongs (as opposed to the single synthesized space
+ * it used to be limited to). No other module imports this function --
+ * verified by grep -- so widening its return shape here is safe.
  * @param {Node} container
  * @param {((el: Element) => boolean)|undefined} customShouldDescend
- * @returns {Text[]}
+ * @returns {TextNodeEntry[]}
  */
 function collectTextNodes(container, customShouldDescend) {
   const shouldDescend = (el) => {
@@ -60,14 +141,32 @@ function collectTextNodes(container, customShouldDescend) {
     return customShouldDescend ? customShouldDescend(el) : true;
   };
 
-  /** @type {Text[]} */
-  const nodes = [];
+  /** @type {TextNodeEntry[]} */
+  const entries = [];
+  let pendingBoundary = false;
+  let prevBlockAncestor = null;
+  let sawAnyText = false;
+
   for (const node of walkDOM(container, { shouldDescend })) {
-    if (node.nodeType === Node.TEXT_NODE && node.nodeValue && isVisibleTextNode(node)) {
-      nodes.push(/** @type {Text} */ (node));
+    if (node.nodeType === Node.ELEMENT_NODE && /** @type {Element} */ (node).tagName === 'BR') {
+      pendingBoundary = true;
+      continue;
     }
+
+    if (node.nodeType !== Node.TEXT_NODE || !node.nodeValue || !isVisibleTextNode(node)) continue;
+
+    const textNode = /** @type {Text} */ (node);
+    const blockAncestor = nearestBlockAncestor(textNode.parentElement || textNode.parentNode, container);
+    const crossedBlock = sawAnyText && blockAncestor !== prevBlockAncestor;
+
+    entries.push({ node: textNode, boundaryBefore: sawAnyText && (pendingBoundary || crossedBlock) });
+
+    pendingBoundary = false;
+    prevBlockAncestor = blockAncestor;
+    sawAnyText = true;
   }
-  return nodes;
+
+  return entries;
 }
 
 /**
@@ -77,32 +176,58 @@ function collectTextNodes(container, customShouldDescend) {
 /**
  * Concatenate visible text nodes in DOM order into one raw string, with a
  * parallel `rawMap` array where `rawMap[i]` is the {node, offset} that
- * produced `raw[i]`. A single space is synthesized between adjacent text
- * nodes when neither side already has boundary whitespace, to avoid
- * mashing words together across inline element boundaries (e.g.
- * "<b>foo</b>bar" vs "<b>foo</b> bar").
+ * produced `raw[i]` (or `null` for a character with no originating DOM
+ * position -- currently only the synthetic block-boundary sentinel below).
+ *
+ * Two kinds of synthetic characters can be inserted between adjacent text
+ * nodes:
+ *  - A single space, when neither side already has boundary whitespace, to
+ *    avoid mashing words together across inline element boundaries (e.g.
+ *    "<b>foo</b>bar" vs "<b>foo</b> bar"). Unchanged from before.
+ *  - BLOCK_BOUNDARY_SENTINEL, when `collectTextNodes` flagged a real block
+ *    boundary (a `<br>`, or crossing into a different BLOCK_LEVEL_TAGS
+ *    ancestor) between the two nodes. splitSentences() hard-splits on this
+ *    sentinel, so it -- not the plain space above -- is what stops a
+ *    heading with no terminal punctuation from gluing onto the paragraph
+ *    after it. The sentinel gets a `null` rawMap entry rather than
+ *    attributing it to either neighboring node: findNearestMapEntry() (used
+ *    by buildLocatorFromOffset) already scans forward/backward past `null`
+ *    entries to find the nearest real one, which is exactly what's needed
+ *    here since the sentinel itself never appears inside any sentence
+ *    string splitSentences() returns (so no locator ever needs to resolve
+ *    to the sentinel's own position).
  * @param {Node} container
  * @param {((el: Element) => boolean)|undefined} shouldDescend
- * @returns {{raw: string, rawMap: MapEntry[], textNodes: Text[]}}
+ * @returns {{raw: string, rawMap: Array<MapEntry|null>, textNodes: Text[]}}
  */
-function buildRawTextAndMap(container, shouldDescend) {
-  const textNodes = collectTextNodes(container, shouldDescend);
+// Exported (only extractSentencesWithLocators/findRangeByText call it inside
+// this file) so tests can assert the exact raw/normalized text this module
+// produces -- e.g. the block-boundary and substring-invariant tests in
+// test/range-mapper-block-boundaries.test.mjs -- without duplicating this
+// function's synthetic-space/sentinel logic in the test itself.
+export function buildRawTextAndMap(container, shouldDescend) {
+  const entries = collectTextNodes(container, shouldDescend);
 
   let raw = '';
-  /** @type {MapEntry[]} */
+  /** @type {Array<MapEntry|null>} */
   const rawMap = [];
 
-  for (let n = 0; n < textNodes.length; n++) {
-    const node = textNodes[n];
+  for (let n = 0; n < entries.length; n++) {
+    const { node, boundaryBefore } = entries[n];
     const value = node.nodeValue || '';
 
     if (n > 0 && raw.length && value.length) {
-      const prevEndsWithSpace = /\s$/.test(raw);
-      const nextStartsWithSpace = /^\s/.test(value);
-      if (!prevEndsWithSpace && !nextStartsWithSpace) {
-        raw += ' ';
-        const prevNode = textNodes[n - 1];
-        rawMap.push({ node: prevNode, offset: (prevNode.nodeValue || '').length });
+      if (boundaryBefore) {
+        raw += BLOCK_BOUNDARY_SENTINEL;
+        rawMap.push(null);
+      } else {
+        const prevEndsWithSpace = /\s$/.test(raw);
+        const nextStartsWithSpace = /^\s/.test(value);
+        if (!prevEndsWithSpace && !nextStartsWithSpace) {
+          raw += ' ';
+          const prevNode = entries[n - 1].node;
+          rawMap.push({ node: prevNode, offset: (prevNode.nodeValue || '').length });
+        }
       }
     }
 
@@ -112,7 +237,7 @@ function buildRawTextAndMap(container, shouldDescend) {
     }
   }
 
-  return { raw, rawMap, textNodes };
+  return { raw, rawMap, textNodes: entries.map((entry) => entry.node) };
 }
 
 // --- Mirrored (map-tracking) normalization, kept in exact lockstep with
@@ -184,9 +309,14 @@ function trackedTrim(state) {
 
 /**
  * Mirrors shared/text/normalize.js#normalizeForSpeech step-for-step while
- * tracking per-character origins back into `rawMap`.
+ * tracking per-character origins back into `rawMap`. `null` entries (the
+ * synthetic block-boundary sentinel -- see buildRawTextAndMap) pass through
+ * untouched: none of normalizeForSpeech's regexes match
+ * BLOCK_BOUNDARY_SENTINEL (it is a private-use code point, never
+ * whitespace/punctuation/symbol), so the real normalizeForSpeech() output
+ * and this mirror always agree on where it ends up.
  * @param {string} raw
- * @param {MapEntry[]} rawMap
+ * @param {Array<MapEntry|null>} rawMap
  * @returns {TrackedState}
  */
 function normalizeWithMap(raw, rawMap) {
@@ -498,13 +628,27 @@ function findRangeByText(container, text) {
  * re-render inserted or removed even one sibling anywhere between the
  * container and the target node, the SAME indices now point at a
  * DIFFERENT node -- silently, with no error, potentially landing on a
- * completely unrelated part of the page. When `expectedText` is supplied,
- * the re-resolved range is checked against it and, on a mismatch, a fresh
- * content-based search (`findRangeByText`) is tried before giving up.
- * Returns null if the content is genuinely gone.
+ * completely unrelated part of the page.
+ *
+ * Both paths -- the fast "nodes are still connected" path AND the re-pathed
+ * one -- clamp `startOffset`/`endOffset` against the LIVE `node.length`
+ * before building the Range, and both run content verification
+ * (`rangeRoughlyMatchesText`) plus, on a mismatch, a fresh content-based
+ * search (`findRangeByText`) before giving up. Neither used to happen on
+ * the fast path: a still-`isConnected` text node whose `nodeValue` a
+ * framework (React commonly does this) reassigned in place would build a
+ * Range with a now-out-of-bounds offset, which either throws
+ * `IndexSizeError` (caught below, degrading to a silently lost highlight)
+ * or, worse, that same in-place mutation is exactly what
+ * `src/content/ui/highlighter.js`'s `surroundContents` fallback does to
+ * every OTHER sentence's stored nodes in a paragraph (via `parent.
+ * normalize()` in its `clear()`) while leaving them connected -- so this
+ * was never a re-pathed-only failure mode. Returns null if the content is
+ * genuinely gone, or if the resulting Range is collapsed (see the
+ * `range.collapsed` check below).
  * @param {object|null} locator
- * @param {string} [expectedText] - the sentence's own text, for verifying a
- *   path-based re-resolution actually landed on the right content.
+ * @param {string} [expectedText] - the sentence's own text, for verifying
+ *   the resolved range actually landed on the right content.
  * @returns {Range|null}
  */
 export function resolveLocatorToRange(locator, expectedText) {
@@ -515,7 +659,6 @@ export function resolveLocatorToRange(locator, expectedText) {
 
     const startOk = startNode && startNode.isConnected;
     const endOk = endNode && endNode.isConnected;
-    let rePathed = false;
 
     if (!startOk || !endOk) {
       if (!containerRef || !containerRef.isConnected || !Array.isArray(nodePath)) return null;
@@ -526,9 +669,6 @@ export function resolveLocatorToRange(locator, expectedText) {
 
       startNode = resolvedStart;
       endNode = resolvedEnd;
-      startOffset = Math.min(startOffset, (startNode.nodeValue || '').length);
-      endOffset = Math.min(endOffset, (endNode.nodeValue || '').length);
-      rePathed = true;
     }
 
     if (!startNode.ownerDocument || startNode.ownerDocument !== endNode.ownerDocument) {
@@ -537,11 +677,29 @@ export function resolveLocatorToRange(locator, expectedText) {
       return null;
     }
 
-    const range = startNode.ownerDocument.createRange();
-    range.setStart(startNode, Math.max(0, startOffset));
-    range.setEnd(endNode, Math.max(0, endOffset));
+    // Clamp against the LIVE node length on every path -- see the doc
+    // comment above for why "still isConnected" is not the same guarantee
+    // as "offsets still in range".
+    const clampedStartOffset = Math.max(0, Math.min(startOffset, (startNode.nodeValue || '').length));
+    const clampedEndOffset = Math.max(0, Math.min(endOffset, (endNode.nodeValue || '').length));
 
-    if (rePathed && expectedText && !rangeRoughlyMatchesText(range, expectedText)) {
+    const range = startNode.ownerDocument.createRange();
+    range.setStart(startNode, clampedStartOffset);
+    range.setEnd(endNode, clampedEndOffset);
+
+    // setEnd() before setStart() never throws when the new end boundary is
+    // actually before the current start boundary -- per spec, the Range
+    // just collapses to that (wrong) point instead. That happens here if
+    // findNearestMapEntry's forward (start) and backward (end) probes
+    // crossed -- e.g. every character of this sentence mapped to a `null`
+    // rawMap entry (see buildLocatorFromOffset). A collapsed range would
+    // highlight nothing, with no error surfacing anywhere, so it must be
+    // treated as a resolution failure just like a thrown exception.
+    if (range.collapsed) return null;
+
+    // Verify content unconditionally, not only after index-path
+    // re-resolution -- see the doc comment above.
+    if (expectedText && !rangeRoughlyMatchesText(range, expectedText)) {
       const fallback = containerRef && containerRef.isConnected ? findRangeByText(containerRef, expectedText) : null;
       return fallback || null;
     }
@@ -557,4 +715,5 @@ export default {
   resolveLocatorToRange,
   computeNodePath,
   resolveNodeFromPath,
+  buildRawTextAndMap,
 };

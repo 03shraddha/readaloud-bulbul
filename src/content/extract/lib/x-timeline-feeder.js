@@ -22,6 +22,7 @@ import {
   X_AUTOSCROLL_MIN_INTERVAL_MS,
   X_MAX_UNITS_PER_BATCH,
   EXTRACT_MORE_TIMEOUT_MS,
+  X_EXTRACT_MORE_MAX_SCROLL_PX,
 } from '../../../shared/constants.js';
 import { SELECTORS, queryAll } from './x-selectors.js';
 import { parseTweet, extractStatusId } from './x-tweet-parser.js';
@@ -76,13 +77,16 @@ export function createTimelineFeeder({ log } = {}) {
     }
   }
 
+  /** @returns {Promise<number>} the (jittered) distance actually asked to scroll, for cumulative-cap tracking. */
   async function scrollStep() {
+    const distance = jitter(X_AUTOSCROLL_STEP_PX);
     try {
-      window.scrollBy({ top: jitter(X_AUTOSCROLL_STEP_PX), left: 0, behavior: 'auto' });
+      window.scrollBy({ top: distance, left: 0, behavior: 'auto' });
     } catch {
       /* scrolling isn't essential to correctness, just to revealing more DOM */
     }
     await sleep(jitter(X_AUTOSCROLL_MIN_INTERVAL_MS));
+    return distance;
   }
 
   /**
@@ -121,22 +125,37 @@ export function createTimelineFeeder({ log } = {}) {
 
   /**
    * @param {'buffer-low'|'end-of-list'} _reason
+   * @param {() => boolean} isAbandoned - true once the caller (extractMore())
+   *   has already resolved via the hard timeout below and stopped waiting on
+   *   this call. This function keeps running after that (a bare `await`
+   *   can't be cancelled), so it must check this itself to stop scrolling
+   *   promptly instead of continuing to walk toward the timeout it already
+   *   lost the race against.
    * @returns {Promise<{tweetDataList: import('./x-tweet-parser.js').TweetData[], exhausted: boolean, timedOut: boolean}>}
    */
-  async function extractMoreCore(_reason) {
+  async function extractMoreCore(_reason, isAbandoned) {
+    const startScrollY = window.scrollY;
     const deadline = Date.now() + EXTRACT_MORE_TIMEOUT_MS;
     const collected = [];
     let staleAttempts = 0;
+    let scrolledPx = 0;
     let lastScrollHeight = document.documentElement.scrollHeight;
+    let exhausted = false;
 
-    while (Date.now() < deadline && collected.length < X_MAX_UNITS_PER_BATCH) {
+    while (
+      Date.now() < deadline &&
+      collected.length < X_MAX_UNITS_PER_BATCH &&
+      scrolledPx < X_EXTRACT_MORE_MAX_SCROLL_PX &&
+      !disposed &&
+      !isAbandoned()
+    ) {
       const fresh = await parseNewOnes(X_MAX_UNITS_PER_BATCH - collected.length);
       collected.push(...fresh);
 
       if (collected.length >= X_MAX_UNITS_PER_BATCH) break;
-      if (Date.now() >= deadline) break;
+      if (Date.now() >= deadline || disposed || isAbandoned()) break;
 
-      await scrollStep();
+      scrolledPx += await scrollStep();
 
       const newScrollHeight = document.documentElement.scrollHeight;
       if (newScrollHeight <= lastScrollHeight && fresh.length === 0) {
@@ -149,26 +168,50 @@ export function createTimelineFeeder({ log } = {}) {
       if (staleAttempts >= STALE_SCROLL_LIMIT) {
         // True end of a finite list (search results, a profile, a list) —
         // several scroll attempts produced neither new height nor new tweets.
-        return { tweetDataList: collected, exhausted: true, timedOut: false };
+        exhausted = true;
+        break;
       }
     }
 
-    return { tweetDataList: collected, exhausted: false, timedOut: Date.now() >= deadline };
+    // A hunt that came back with nothing found has no content to show for
+    // the distance it travelled -- restoring the pre-hunt position leaves
+    // the reader exactly where they were instead of somewhere down the
+    // timeline they never asked to see, whether that hunt stopped because
+    // it hit the deadline, the X_EXTRACT_MORE_MAX_SCROLL_PX cap, disposal,
+    // or abandonment by the hard timeout below.
+    if (collected.length === 0) {
+      try {
+        window.scrollTo({ top: startScrollY, left: 0, behavior: 'auto' });
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return { tweetDataList: collected, exhausted, timedOut: !exhausted && Date.now() >= deadline };
   }
 
   /**
    * Hard wall-clock bail-out: if extractMoreCore somehow doesn't resolve
    * within EXTRACT_MORE_TIMEOUT_MS, resolve empty rather than let the caller
-   * (content/main.js's REQUEST_MORE_UNITS handler) hang.
+   * (content/main.js's REQUEST_MORE_UNITS handler) hang. `extractMoreCore`
+   * itself keeps running after that (nothing can actually abort a suspended
+   * `await`) -- flip the local `abandoned` flag it was handed so its own
+   * loop notices next time it checks and stops scrolling, rather than
+   * quietly continuing to move the page after this call has already told
+   * its caller "nothing found".
    * @param {'buffer-low'|'end-of-list'} reason
    */
   async function extractMore(reason) {
     if (disposed) {
       return { tweetDataList: [], exhausted: false, timedOut: false };
     }
-    const core = extractMoreCore(reason);
+    let abandoned = false;
+    const core = extractMoreCore(reason, () => abandoned);
     const hardTimeout = new Promise((resolve) => {
-      setTimeout(() => resolve({ tweetDataList: [], exhausted: false, timedOut: true }), EXTRACT_MORE_TIMEOUT_MS);
+      setTimeout(() => {
+        abandoned = true;
+        resolve({ tweetDataList: [], exhausted: false, timedOut: true });
+      }, EXTRACT_MORE_TIMEOUT_MS);
     });
     return Promise.race([core, hardTimeout]);
   }
@@ -190,7 +233,11 @@ export function createTimelineFeeder({ log } = {}) {
     extractInitialBatch,
     extractMore,
     dispose,
-    /** exposed for tests / diagnostics only */
+    // Exposed for tests/diagnostics AND for real logic: twitter.js's
+    // ensureVisible() reads this insertion-ordered Set to guess which
+    // direction a not-currently-mounted tweet is in (emitted earlier than
+    // everything on screen now -> scrolled past already -> above; see its
+    // inferHuntDirection()).
     _emittedStatusIds: emittedStatusIds,
   };
 }
