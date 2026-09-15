@@ -35,6 +35,25 @@ let readyPromise = null;
  * fresh document needs (re-)initializing. */
 let lastInit = null;
 
+/**
+ * Bumped every time an OFFSCREEN_INIT actually goes out. OFFSCREEN_INIT
+ * calls AudioQueue.reset(), which drops every blob the queue was holding --
+ * including sentences background already counts as `dispatched` and will
+ * therefore never fetch again. Callers compare this counter across an
+ * `await ensureOffscreenReady()` to notice "the document I was talking to is
+ * not the one I am talking to now" and re-seed it. See
+ * Session.offscreenWasReinitialized().
+ */
+let initGeneration = 0;
+
+/**
+ * @returns {number} how many OFFSCREEN_INITs have been sent in this
+ *   service-worker lifetime. Only differences matter, never the value.
+ */
+export function getOffscreenGeneration() {
+  return initGeneration;
+}
+
 /** Single-flight guard for ensureOffscreenReady(), keyed by sessionId. */
 let ensurePromise = null;
 let ensureSessionId = null;
@@ -168,6 +187,7 @@ export async function ensureOffscreenReady(sessionId, rate, startIndex) {
       await createDocumentIfNeeded();
       await waitUntilReady();
       lastInit = { sessionId, rate };
+      initGeneration += 1;
       await safeSendRuntimeMessage(
         makeEnvelope(MSG.OFFSCREEN_INIT, TARGET.OFFSCREEN, sessionId, {
           sessionId,
@@ -180,6 +200,7 @@ export async function ensureOffscreenReady(sessionId, rate, startIndex) {
 
     if (!lastInit || lastInit.sessionId !== sessionId) {
       lastInit = { sessionId, rate };
+      initGeneration += 1;
       await safeSendRuntimeMessage(
         makeEnvelope(MSG.OFFSCREEN_INIT, TARGET.OFFSCREEN, sessionId, {
           sessionId,

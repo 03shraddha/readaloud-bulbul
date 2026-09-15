@@ -104,6 +104,10 @@ class Session {
      * again, undoing the back navigation). See handleSentenceStarted(). */
     this.seekGeneration = 0;
 
+    /** Last offscreen init-generation this session observed, or null before
+     * its first ensureOffscreenReady(). See offscreenWasReinitialized(). */
+    this.offscreenGeneration = null;
+
     /** @type {Map<number, number|null>} index -> durationHintMs, cleared once consumed */
     this.durationHints = new Map();
 
@@ -262,6 +266,58 @@ class Session {
     }
   }
 
+  // --- offscreen document lifetime ------------------------------------------
+
+  /**
+   * Call right after every `await offscreenManager.ensureOffscreenReady()`.
+   *
+   * Chrome closes an offscreen document created with the AUDIO_PLAYBACK
+   * reason once it has gone ~30s without actually playing audio -- and it
+   * does so silently, with no event this extension can listen for. A pause
+   * longer than that (or a long first read where the user never presses Play)
+   * therefore destroys the document behind our back. ensureOffscreenReady()
+   * then transparently recreates it and re-sends OFFSCREEN_INIT, which calls
+   * AudioQueue.reset(): the replacement queue is EMPTY.
+   *
+   * That empty queue is what made Play-after-a-long-pause do nothing at all.
+   * Every sentence background had already handed over is sitting in
+   * prefetchQueue.dispatched, which only ever drains on SENTENCE_ENDED -- and
+   * those sentences no longer exist anywhere, so that event never comes.
+   * queuedAhead stays pinned at PREFETCH_AHEAD, fill() refuses to fetch
+   * anything more, AUDIO_PLAY sets wantsPlay on a queue with nothing in it,
+   * and the session sits silent forever with no error surfaced.
+   *
+   * @returns {boolean} true if the document was (re)initialized since this
+   *   session last looked, meaning the caller must re-seed it.
+   */
+  offscreenWasReinitialized() {
+    const generation = offscreenManager.getOffscreenGeneration();
+    const previous = this.offscreenGeneration;
+    this.offscreenGeneration = generation;
+    // A null `previous` is this session's FIRST look, i.e. the init that
+    // belongs to it -- nothing was lost, so there is nothing to re-seed.
+    return previous !== null && previous !== generation;
+  }
+
+  /**
+   * Re-synthesize from the playhead into a freshly-created offscreen
+   * document. The audio for the current sentence is gone with the old
+   * document, so playback restarts at the beginning of that sentence rather
+   * than mid-word -- there is no byte left anywhere to resume from.
+   */
+  reseedOffscreenAudio() {
+    if (this.destroyed || this.status === 'stopped') return;
+    log.info('offscreen document was replaced; re-seeding audio from the playhead', {
+      sessionId: this.sessionId,
+      index: this.cursor,
+    });
+    if (this.status !== 'paused') {
+      this.status = 'buffering';
+      this.emitPlaybackState();
+    }
+    this.prefetchQueue.start(Math.max(0, this.cursor));
+  }
+
   // --- CONTROL_* transitions -------------------------------------------------
 
   handleControlPlay() {
@@ -290,7 +346,14 @@ class Session {
     offscreenManager
       .ensureOffscreenReady(this.sessionId, this.rate, this.cursor)
       .then(() => {
+        if (this.destroyed) return;
+        // AUDIO_PLAY first, unconditionally: it only sets wantsPlay, so on a
+        // replacement document it arms the empty queue to start the instant
+        // the re-seeded audio lands, instead of arriving after it and
+        // leaving the first re-fetched sentence sitting there loaded but
+        // paused.
         offscreenManager.sendToOffscreen(makeEnvelope(MSG.AUDIO_PLAY, TARGET.OFFSCREEN, this.sessionId, {}));
+        if (this.offscreenWasReinitialized()) this.reseedOffscreenAudio();
       })
       .catch((err) => {
         // Without this, a failed offscreen-document handshake (rare, but
@@ -416,6 +479,12 @@ class Session {
     offscreenManager
       .ensureOffscreenReady(this.sessionId, this.rate, target)
       .then(() => {
+        // Result deliberately discarded: prefetchQueue.start(target) below
+        // already re-seeds everything a replacement document would need.
+        // Recording the generation here is what stops the NEXT Play from
+        // seeing a stale value and redundantly restarting the queue on top
+        // of this seek. See offscreenWasReinitialized().
+        this.offscreenWasReinitialized();
         offscreenManager.sendToOffscreen(
           makeEnvelope(MSG.AUDIO_FLUSH, TARGET.OFFSCREEN, this.sessionId, { fromIndex: target })
         );

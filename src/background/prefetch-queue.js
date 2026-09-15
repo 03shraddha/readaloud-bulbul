@@ -325,6 +325,27 @@ export class PrefetchQueue {
       this.inFlight.delete(idx);
       if (this.stopped || controller.signal.aborted) return; // dropped by a reset in the meantime
 
+      // Synthesis is a multi-second network round trip, and Chrome closes an
+      // idle AUDIO_PLAYBACK offscreen document out from under us — which is
+      // easiest to hit during exactly this await, since a paused or buffering
+      // session has no audio playing to keep the document alive. Re-check
+      // instead of dispatching into a document that no longer exists:
+      // safeSendRuntimeMessage would swallow the resulting "Receiving end
+      // does not exist", but `idx` would still be pushed to `dispatched`,
+      // where only a SENTENCE_ENDED can ever remove it — and that sentence's
+      // audio no longer exists anywhere to end. queuedAhead would stay pinned
+      // and fill() would never fetch again.
+      await offscreenManager.ensureOffscreenReady(session.sessionId, session.rate, session.cursor);
+      if (this.stopped || controller.signal.aborted) return;
+      if (session.offscreenWasReinitialized()) {
+        // The replacement document's queue is empty and everything in
+        // `dispatched` is unreachable. Rebuild from the playhead rather than
+        // dispatching this one sentence into an otherwise-empty queue whose
+        // cursor sits several indices behind it.
+        session.reseedOffscreenAudio();
+        return;
+      }
+
       this.dispatched.push(idx);
       session.durationHints.set(idx, result.durationMs ?? null);
 
