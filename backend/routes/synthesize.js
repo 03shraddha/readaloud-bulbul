@@ -90,6 +90,7 @@ router.post('/synthesize', async (req, res) => {
   } catch (err) {
     const appErr = err instanceof AppError ? err : ERRORS.internal(err?.message || 'Unexpected error');
     req.mockFlag = isMockMode();
+    console.error(`[boyle-backend] /v1/synthesize failed (${appErr.code}):`, appErr.message);
     res.status(appErr.status).json(errorBody(appErr));
   }
 });

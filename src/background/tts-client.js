@@ -11,7 +11,7 @@
  * is responsible for skipping that sentence, toasting, and moving on.
  */
 
-import { SYNTH_PATH, DEFAULT_SPEAKER } from '../shared/constants.js';
+import { SYNTH_PATH, DEFAULT_SPEAKER, isValidV4SpeakerId } from '../shared/constants.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('background:tts-client');
@@ -93,10 +93,18 @@ async function synthesizeOnce({ sentence, settings, signal }) {
   const baseUrl = settings?.backendBaseUrl;
   const url = `${baseUrl}${SYNTH_PATH}`;
 
-  // Fallback to DEFAULT_SPEAKER if speaker is invalid/missing
-  const speaker = (settings?.speaker && settings.speaker !== 'default' && settings.speaker.trim())
-    ? settings.speaker.trim()
-    : DEFAULT_SPEAKER;
+  // Fall back to DEFAULT_SPEAKER if speaker is missing, or is not shaped
+  // like a real bulbul:v4-flash ID (voice_language_style). The latter check
+  // matters because patchSettings() (src/shared/storage.js) persists the
+  // FULL settings object on every write, not just the changed key -- so the
+  // very first unrelated settings change (e.g. adjusting playback rate)
+  // once captured whatever DEFAULT_SPEAKER was at that moment ('shubh', a
+  // bulbul:v3 name) and wrote it to chrome.storage permanently. That stored
+  // value is explicit, so it always wins over DEFAULT_SPEAKER in
+  // getSettings()'s merge -- upgrading DEFAULT_SPEAKER in code can never
+  // reach a session with a v3 speaker already on disk without this guard.
+  const storedSpeaker = settings?.speaker && settings.speaker !== 'default' ? settings.speaker.trim() : '';
+  const speaker = isValidV4SpeakerId(storedSpeaker) ? storedSpeaker : DEFAULT_SPEAKER;
 
   const body = {
     text: sentence.text,

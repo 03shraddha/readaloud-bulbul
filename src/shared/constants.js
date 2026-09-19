@@ -59,7 +59,42 @@ export const SUPPORTED_LANGUAGES = [
   'ta-IN',
   'te-IN',
 ];
-export const DEFAULT_SPEAKER = 'shubh';
+// bulbul:v4-flash speaker IDs are voice_language_style (e.g.
+// aparna_en_companion), replacing v3's bare voice name (e.g. 'shubh') --
+// confirmed live, a v3-shaped ID is rejected outright with HTTP 400 on v4.
+// aparna_en_companion is Sarvam's ranked pick for Customer Care & Empathetic
+// Support -- chosen over the EdTech pick for a warmer, more conversational
+// read.
+export const DEFAULT_SPEAKER = 'aparna_en_companion';
+
+// Every bulbul:v4-flash speaker ID is voice_language_style, where the
+// language segment is one of the codes below (Bulbul v4 Flash Best
+// Practices Guide, "How a speaker ID is formed" / "Roster coverage by
+// language"). Used to detect a speaker value left over from bulbul:v3
+// (bare voice names like 'shubh', with no language segment at all).
+const V4_SPEAKER_LANGUAGE_SEGMENTS = [
+  'hi', 'en', 'enhi', 'mr', 'kn', 'pa', 'ta', 'te', 'bn', 'gu', 'as', 'ml', 'od',
+];
+const V4_SPEAKER_ID_RE = new RegExp(
+  `^[a-z][a-z0-9]*_(${V4_SPEAKER_LANGUAGE_SEGMENTS.join('|')})_[a-z][a-z0-9_]*$`,
+  'i'
+);
+
+/**
+ * A settings.speaker value surviving from a bulbul:v3 install (persisted
+ * once via patchSettings()'s full-object writes -- see tts-client.js's
+ * synthesizeOnce()) will never resolve to a valid bulbul:v4-flash speaker no
+ * matter what DEFAULT_SPEAKER becomes later, because it is an explicit
+ * stored value and always wins over a code-level default. Every real
+ * bulbul:v4-flash ID has the voice_language_style shape; a stored value
+ * that doesn't match it (like the bare 'shubh') is model debris, not a
+ * deliberate choice, and must not be sent upstream as-is.
+ * @param {string} speaker
+ * @returns {boolean}
+ */
+export function isValidV4SpeakerId(speaker) {
+  return typeof speaker === 'string' && V4_SPEAKER_ID_RE.test(speaker.trim());
+}
 
 // --- X / Twitter autoscroll pacing ---
 export const X_AUTOSCROLL_STEP_PX = 600;

@@ -56,7 +56,7 @@ export const config = Object.freeze({
   port: numFromEnv('PORT', 8787),
   sarvamApiKey: process.env.SARVAM_API_KEY || '',
   sarvamTtsBaseUrl: process.env.SARVAM_TTS_BASE_URL || 'https://api.sarvam.ai',
-  sarvamTtsModel: process.env.SARVAM_TTS_MODEL || 'bulbul:v3',
+  sarvamTtsModel: process.env.SARVAM_TTS_MODEL || 'bulbul:v4-flash',
   mockTts: boolFromEnv('MOCK_TTS'),
   mockLatencyMs: numFromEnv('MOCK_LATENCY_MS', 250),
   mockFailRate: numFromEnv('MOCK_FAIL_RATE', 0),

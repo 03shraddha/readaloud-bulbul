@@ -120,7 +120,7 @@ curl -s http://localhost:8787/v1/health | jq .
 ```
 
 ```json
-{ "ok": true, "mock": true, "model": "bulbul:v3", "version": "0.1.0", "uptime_s": 12, "has_api_key": false }
+{ "ok": true, "mock": true, "model": "bulbul:v4-flash", "version": "0.1.0", "uptime_s": 12, "has_api_key": false }
 ```
 
 ### `GET /v1/voices`
@@ -131,9 +131,9 @@ curl -s http://localhost:8787/v1/voices | jq .
 
 ```json
 {
-  "speakers": ["shubh"],
+  "speakers": ["aparna_en_companion"],
   "languages": ["bn-IN", "en-IN", "gu-IN", "hi-IN", "kn-IN", "ml-IN", "mr-IN", "od-IN", "pa-IN", "ta-IN", "te-IN"],
-  "defaults": { "speaker": "shubh", "language_code": "en-IN", "pace": 1.0, "temperature": 0.6, "speech_sample_rate": 24000, "output_audio_codec": "mp3" },
+  "defaults": { "speaker": "aparna_en_companion", "language_code": "en-IN", "pace": 1.0, "temperature": 0.6, "speech_sample_rate": 24000, "output_audio_codec": "mp3" },
   "codecs": ["wav", "mp3", "linear16", "mulaw", "alaw", "opus", "flac", "aac"]
 }
 ```
