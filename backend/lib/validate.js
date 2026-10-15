@@ -30,7 +30,7 @@ export const CODECS = ['wav', 'mp3', 'linear16', 'mulaw', 'alaw', 'opus', 'flac'
 
 // Kept in sync with src/shared/constants.js's DEFAULT_SPEAKER -- see that
 // file's comment for why a bulbul:v4-flash ID has this shape.
-export const DEFAULT_SPEAKER = 'aparna_en_companion';
+export const DEFAULT_SPEAKER = 'simran_en_sales';
 
 export const DEFAULTS = Object.freeze({
   language_code: 'en-IN',

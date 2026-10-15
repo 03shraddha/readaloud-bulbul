@@ -272,7 +272,7 @@ function extractQuote(articleEl, tweetTextNodes) {
 
   let name = '';
   try {
-    const userNameNodes = articleEl.querySelectorAll('[data-testid="User-Name"]');
+    const userNameNodes = queryAll(articleEl, SELECTORS.userName);
     const quoteNameEl = userNameNodes.length > 1 ? userNameNodes[1] : null;
     name = quoteNameEl ? collectDisplayNameText(quoteNameEl) : '';
   } catch {

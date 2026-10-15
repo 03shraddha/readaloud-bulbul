@@ -180,6 +180,9 @@ async function handleActivate() {
     const widget = await getWidget();
     widget?.mount?.();
     widget?.setPosition?.(currentSettings.widgetPosition ?? null);
+    // Lets the widget's Play button start from a text selection when there is
+    // one (play-from-selection); no-op if the widget build predates it.
+    widget?.setStartResolver?.(resolveSelectionStartIndex);
 
     await activeExtractor.init({
       log: createLogger(`content:${activeExtractor.id}`),
@@ -312,7 +315,17 @@ async function handleHighlightSentence(payload) {
   }
 
   try {
-    await activeExtractor.ensureVisible(sentence);
+    // Resuming from pause re-emits SENTENCE_STARTED for the sentence that was
+    // already playing (the offscreen queue resets its startedEmitted flag on
+    // pause -- see audio-queue.js pause()), so this handler runs again for a
+    // sentence that is already highlighted and already on screen. Re-running
+    // ensureVisible() there re-scrolls the page on every single pause->play,
+    // which reads as jankiness. Skip the scroll when the request is for the
+    // sentence we are already showing; the highlight below is idempotent.
+    const isAlreadyActive = payload.sentenceId === activeHighlightId;
+    if (!isAlreadyActive) {
+      await activeExtractor.ensureVisible(sentence);
+    }
     const anchor = await activeExtractor.resolveAnchor(sentence);
 
     // ensureVisible()/resolveAnchor() together can take anywhere from
@@ -374,6 +387,90 @@ async function handleHighlightSentence(payload) {
       })
     );
   }
+}
+
+/**
+ * Play-from-selection resolver, handed to the widget so its Play button can
+ * start reading from wherever the user has selected text on the page. Returns
+ * the index of the first extracted sentence at or after the selection start,
+ * or null when there's no usable selection (the common case) so Play keeps
+ * its normal "start from the cursor / top" behavior.
+ *
+ * Deliberately uses only resolveAnchor(), never ensureVisible(): resolving an
+ * anchor is a cheap, side-effect-free Range lookup, whereas ensureVisible()
+ * scrolls the page, which must not happen merely from inspecting a selection.
+ * @returns {Promise<{index:number}|null>}
+ */
+async function resolveSelectionStartIndex() {
+  if (!activeExtractor || sentenceMap.size === 0) return null;
+
+  let selection;
+  try {
+    selection = window.getSelection();
+  } catch {
+    return null;
+  }
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+
+  const selectedText = selection.toString();
+  if (!selectedText || !selectedText.trim()) return null;
+
+  let selRange;
+  try {
+    selRange = selection.getRangeAt(0);
+  } catch {
+    return null;
+  }
+  if (!selRange || selRange.collapsed) return null;
+
+  const startNode = selRange.startContainer;
+  const startOffset = selRange.startOffset;
+
+  // Sentence indices are monotonic and document-ordered, so the target is the
+  // first sentence whose range either contains the selection start
+  // (comparePoint === 0) or begins after it (comparePoint === -1, i.e. the
+  // selection starts in a gap just before this sentence). resolveAnchor() is
+  // called lazily in order and we stop at that first hit.
+  const ordered = Array.from(sentenceMap.values()).sort((a, b) => a.index - b.index);
+
+  for (const sentence of ordered) {
+    let range = null;
+    try {
+      const anchor = await activeExtractor.resolveAnchor(sentence);
+      if (!anchor) continue;
+      if (anchor.kind === 'range' && anchor.range) {
+        range = anchor.range;
+      } else if (anchor.kind === 'element' && anchor.element) {
+        range = document.createRange();
+        range.selectNode(anchor.element);
+      }
+    } catch {
+      continue;
+    }
+    if (!range) continue;
+
+    let cmp;
+    try {
+      cmp = range.comparePoint(startNode, startOffset);
+    } catch {
+      // Selection point isn't comparable to this range (different tree, stale
+      // node); it just isn't the sentence we're looking for.
+      continue;
+    }
+
+    if (cmp === 0 || cmp === -1) {
+      // Drop the native selection so it doesn't sit under the reading
+      // highlight that's about to land on the same text.
+      try {
+        selection.removeAllRanges();
+      } catch {
+        /* ignore */
+      }
+      return { index: sentence.index };
+    }
+  }
+
+  return null;
 }
 
 /** Clear whatever highlight is currently applied, if any. */

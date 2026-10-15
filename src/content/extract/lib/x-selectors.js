@@ -24,16 +24,26 @@
 
 export const SELECTORS = Object.freeze({
   /** The tweet card itself. Everything else below is scoped under one of these. */
-  article: { selector: 'article[data-testid="tweet"]', optional: false },
+  // Second alternative: X's newer front end (seen logged-out, Sept 2026) drops
+  // every data-testid and renders a bare <article class="flex flex-col ...">.
+  article: { selector: 'article[data-testid="tweet"], article:not([data-testid])', optional: false },
 
   /** Author block; contains the display name (before the "@handle" run). */
-  userName: { selector: '[data-testid="User-Name"]', optional: false },
+  userName: {
+    selector: '[data-testid="User-Name"], a.x-link:has(.text-body.text-primary)',
+    optional: false,
+  },
 
   /** The `<time>` element whose ancestor `<a>` carries the /status/<id> permalink. */
   time: { selector: 'time', optional: false },
 
   /** Tweet body text. Absent for e.g. a poll-only or a media-only tweet. */
-  tweetText: { selector: '[data-testid="tweetText"]', optional: true },
+  // New front end: the body is a <span> with these two utility classes.
+  tweetText: {
+    selector:
+      '[data-testid="tweetText"], span[class*="text-[length:inherit]"][class*="text-[color:inherit]"]',
+    optional: true,
+  },
 
   /** "Jane Doe reposted" / "Promoted" / reply-context line above the tweet. */
   socialContext: { selector: '[data-testid="socialContext"]', optional: true },
@@ -45,7 +55,10 @@ export const SELECTORS = Object.freeze({
   cardWrapper: { selector: '[data-testid="card.wrapper"]', optional: true },
 
   /** "Show more" expander for a truncated tweet body. */
-  showMoreLink: { selector: '[data-testid="tweet-text-show-more-link"]', optional: true },
+  showMoreLink: {
+    selector: '[data-testid="tweet-text-show-more-link"], button[class*="text-brand"]',
+    optional: true,
+  },
 
   /** Poll widget wrapper. */
   poll: { selector: '[data-testid="cardPoll"]', optional: true },

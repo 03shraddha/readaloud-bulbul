@@ -299,6 +299,14 @@ export function createWidget({ onControl } = {}) {
   }
 
   function wireEvents() {
+    // Pressing a button normally collapses whatever text the user had
+    // selected on the page (the mousedown clears the selection before our
+    // click handler ever runs). Play-from-selection needs that selection to
+    // survive the click, so suppress the default on the Play button's
+    // mousedown -- the click still fires, but the selection stays put. This
+    // is the same trick rich-text toolbars use to keep a selection while a
+    // format button is pressed.
+    refs.playBtn.addEventListener('mousedown', (e) => e.preventDefault());
     refs.playBtn.addEventListener('click', () => onControl?.(MSG.CONTROL_TOGGLE, {}));
     refs.prevBtn.addEventListener('click', () =>
       onControl?.(MSG.CONTROL_SKIP, { direction: 'prev', granularity: 'sentence' })
@@ -588,8 +596,47 @@ let trackedResumeContentKey = null;
 let singleton = null;
 let resumeBanner = null;
 
+/** Last status seen from PLAYBACK_STATE — lets singletonControl() tell a
+ * play-toggle apart from a pause-toggle without asking the background. */
+let lastStatus = 'idle';
+
+/** Optional async () => ({index}|null) set by content/main.js: resolves the
+ * page's current text selection to the sentence to start from. See
+ * singletonControl(). */
+let startResolver = null;
+
 function sendControl(type, payload) {
   safeSendRuntimeMessage(makeEnvelope(type, TARGET.BACKGROUND, trackedSessionId, payload));
+}
+
+/**
+ * Control sink for the singleton widget. Behaves exactly like sendControl()
+ * except it implements play-from-selection: when a toggle is about to START
+ * playback (rather than pause it), it first asks startResolver whether the
+ * user has selected text to begin from. If so, it seeks there and plays;
+ * otherwise it toggles normally, so an empty selection just plays from the
+ * cursor/top as before. A pause-toggle never consults the selection.
+ * @param {string} type
+ * @param {object} payload
+ */
+async function singletonControl(type, payload) {
+  if (type === MSG.CONTROL_TOGGLE) {
+    const willStartPlaying = lastStatus !== 'playing' && lastStatus !== 'buffering';
+    if (willStartPlaying && typeof startResolver === 'function') {
+      let target = null;
+      try {
+        target = await startResolver();
+      } catch {
+        target = null;
+      }
+      if (target && Number.isInteger(target.index)) {
+        sendControl(MSG.CONTROL_SEEK, { index: target.index });
+        sendControl(MSG.CONTROL_PLAY, {});
+        return;
+      }
+    }
+  }
+  sendControl(type, payload);
 }
 
 function sendResumeDecision({ accept, index }) {
@@ -608,7 +655,7 @@ function sendResumeDecision({ accept, index }) {
 /** Creates (mounting) the full player singleton if it doesn't exist yet. */
 function ensureSingleton() {
   if (!singleton) {
-    singleton = createWidget({ onControl: sendControl });
+    singleton = createWidget({ onControl: singletonControl });
     singleton.mount();
   }
   return singleton;
@@ -633,6 +680,7 @@ function dispatchMessage(type, payload) {
       break;
     case MSG.PLAYBACK_STATE:
       trackedSessionId = payload?.sessionId ?? trackedSessionId;
+      if (payload && typeof payload.status === 'string') lastStatus = payload.status;
       ensureSingleton().render(payload);
       break;
     case MSG.RESUME_AVAILABLE:
@@ -652,6 +700,7 @@ function dispatchMessage(type, payload) {
         );
         widget.unmount();
       }
+      lastStatus = 'idle';
       break;
     }
     case MSG.TOAST:
@@ -686,11 +735,20 @@ const defaultExport = {
     // tagged with this DEAD session's id, which the background silently
     // ignores (sessionId mismatch), making the click appear to do nothing.
     trackedSessionId = null;
+    lastStatus = 'idle';
   },
   render: (...args) => ensureSingleton().render(...args),
   showTextFallback: (...args) => ensureSingleton().showTextFallback(...args),
   toast: (...args) => ensureSingleton().toast(...args),
   setPosition: (...args) => ensureSingleton().setPosition(...args),
+  /**
+   * Register the play-from-selection resolver (content/main.js supplies it on
+   * ACTIVATE). Passing a non-function clears it. See singletonControl().
+   * @param {null|(() => Promise<{index:number}|null>)} fn
+   */
+  setStartResolver: (fn) => {
+    startResolver = typeof fn === 'function' ? fn : null;
+  },
   /** Compatibility shim consumed by content/main.js's forwardToWidget(). */
   onMessage: (type, payload) => dispatchMessage(type, payload),
 };

@@ -60,12 +60,14 @@ export const SUPPORTED_LANGUAGES = [
   'te-IN',
 ];
 // bulbul:v4-flash speaker IDs are voice_language_style (e.g.
-// aparna_en_companion), replacing v3's bare voice name (e.g. 'shubh') --
+// simran_en_sales), replacing v3's bare voice name (e.g. 'shubh') --
 // confirmed live, a v3-shaped ID is rejected outright with HTTP 400 on v4.
-// aparna_en_companion is Sarvam's ranked pick for Customer Care & Empathetic
-// Support -- chosen over the EdTech pick for a warmer, more conversational
-// read.
-export const DEFAULT_SPEAKER = 'aparna_en_companion';
+// simran_en_sales is Simran's only pure-English (en) voice in the Best
+// Practices Guide roster (§07) and its rank-1 female pick for EN-IN. The
+// guide notes a voice isn't restricted to the use case it was auditioned
+// for, so the "sales" style reads English narration well. aparna_en_companion
+// (the previous default) stays one click away in the options speaker list.
+export const DEFAULT_SPEAKER = 'simran_en_sales';
 
 // Every bulbul:v4-flash speaker ID is voice_language_style, where the
 // language segment is one of the codes below (Bulbul v4 Flash Best

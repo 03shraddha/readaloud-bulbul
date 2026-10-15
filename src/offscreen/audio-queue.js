@@ -25,10 +25,28 @@
  */
 
 import { MSG } from '../shared/messages.js';
-import { TICK_INTERVAL_MS } from '../shared/constants.js';
+import { TICK_INTERVAL_MS, PREFETCH_AHEAD } from '../shared/constants.js';
 
-/** Hard cap on simultaneously-live object URLs (shared_contracts §9). */
-const MAX_LIVE_URLS = 6;
+/**
+ * Hard cap on simultaneously-live object URLs (shared_contracts §9).
+ *
+ * This MUST stay comfortably above PREFETCH_AHEAD. In steady state the
+ * offscreen document legitimately holds one URL per sentence the background
+ * has dispatched but not yet seen end -- the playing clip, the preloaded
+ * next clip, and everything buffered ahead, i.e. up to PREFETCH_AHEAD at
+ * once, plus a brief transient where a freshly-arrived SENTENCE_AUDIO_READY
+ * overlaps a just-ended clip whose SENTENCE_ENDED revoke hasn't landed yet.
+ *
+ * When the cap was equal to PREFETCH_AHEAD, that transient tipped
+ * _enforceUrlCap() into evicting a *pending* sentence -- a future sentence
+ * the player still needs. Background never re-sends it (it's already in
+ * `dispatched`, which only drains on SENTENCE_ENDED, and that sentence's
+ * audio no longer exists to end), so when playback reaches that index
+ * _pump() waits for it forever: a permanent stall partway through a long
+ * article. The headroom here keeps eviction from ever touching a sentence
+ * that is still on the path to being played.
+ */
+const MAX_LIVE_URLS = PREFETCH_AHEAD + 4;
 
 /** MediaError.code -> our PLAYBACK_ERROR code vocabulary. */
 const ERROR_CODE_BY_MEDIA_ERROR = {
