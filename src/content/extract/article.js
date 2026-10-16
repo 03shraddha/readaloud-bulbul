@@ -499,6 +499,42 @@ function resolveElementLocator(locator) {
   return null;
 }
 
+const CHAT_ANSWER_SELECTOR = [
+  '[data-message-author-role="assistant"]',
+  '.font-claude-message',
+  '[data-is-streaming]',
+].join(', ');
+
+/**
+ * Chat apps (ChatGPT, Claude) wrap the whole conversation in app chrome
+ * (header buttons like "Upgrade", composer, sidebar), so the generic
+ * readability scorer can land on that chrome and read it instead of the
+ * answer. On those hosts, read the assistant message the reader is looking
+ * at: the one with the most on-screen area, the later one on a tie.
+ * @returns {Element|null}
+ */
+function pickChatAnswerContainer() {
+  let nodes = [];
+  try {
+    nodes = Array.from(document.querySelectorAll(CHAT_ANSWER_SELECTOR));
+  } catch {
+    return null;
+  }
+  let best = null;
+  let bestVisible = -1;
+  const vh = window.innerHeight || 0;
+  for (const el of nodes) {
+    if (!(el.textContent || '').trim()) continue;
+    const r = el.getBoundingClientRect();
+    const visible = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+    if (visible >= bestVisible) {
+      bestVisible = visible;
+      best = el;
+    }
+  }
+  return best;
+}
+
 const articleExtractor = {
   id: 'article',
 
@@ -533,7 +569,7 @@ const articleExtractor = {
     const log = this._log || fallbackLog;
     try {
       const languageCode = (this._settings && this._settings.languageCode) || 'en-IN';
-      const container = findBestContainer(document);
+      const container = pickChatAnswerContainer() || findBestContainer(document);
       let { units, sentenceTexts } = buildUnits(container, languageCode);
 
       // Signature of scroll-gated lazy content (see revealLazyContent()):
