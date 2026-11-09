@@ -31,6 +31,13 @@ const CANDIDATE_SELECTOR = [
   '.article-body',
   '.story-body',
   '.post-body',
+  // Themes that run the words together (kk.org's Technium uses
+  // #maincontent > .entrybody). Without these the finder fell back to
+  // document.body and read the sidebar's post list before the essay.
+  '.entrybody',
+  '.entry-body',
+  '#maincontent',
+  '#main-content',
 ].join(', ');
 
 // HEADER is deliberately NOT in this unconditional set -- see the

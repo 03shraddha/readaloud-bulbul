@@ -131,9 +131,9 @@ curl -s http://localhost:8787/v1/voices | jq .
 
 ```json
 {
-  "speakers": ["aparna_en_companion"],
+  "speakers": ["simran_enhi_customer"],
   "languages": ["bn-IN", "en-IN", "gu-IN", "hi-IN", "kn-IN", "ml-IN", "mr-IN", "od-IN", "pa-IN", "ta-IN", "te-IN"],
-  "defaults": { "speaker": "aparna_en_companion", "language_code": "en-IN", "pace": 1.0, "temperature": 0.6, "speech_sample_rate": 24000, "output_audio_codec": "mp3" },
+  "defaults": { "speaker": "simran_enhi_customer", "language_code": "en-IN", "pace": 1.0, "temperature": 0.6, "speech_sample_rate": 24000, "output_audio_codec": "mp3" },
   "codecs": ["wav", "mp3", "linear16", "mulaw", "alaw", "opus", "flac", "aac"]
 }
 ```
