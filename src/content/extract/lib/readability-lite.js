@@ -80,6 +80,54 @@ const STRIP_CLASS_ID_RE =
  * @returns {boolean} true if this element (and everything under it) should
  *   be excluded from scoring and unit extraction.
  */
+/** container -> length of its text, so the majority check below costs one
+ * textContent read per container, not one per stripped element. */
+const containerTextLengthCache = new WeakMap();
+
+/**
+ * @param {Element} container
+ * @returns {number}
+ */
+function containerTextLength(container) {
+  if (containerTextLengthCache.has(container)) return containerTextLengthCache.get(container);
+  const length = (container.textContent || '').length;
+  containerTextLengthCache.set(container, length);
+  return length;
+}
+
+/** Share of the container's text above which a class/role match is treated
+ * as a naming accident, not as page chrome. */
+const STRIP_MAJORITY_SHARE = 0.7;
+
+/** Names the majority rule never rescues. A long comment thread or a wall
+ * of related links can truly outweigh a short post, and must stay out. */
+const ALWAYS_STRIP_NAME_RE = /comment|disqus|related|cookie|paywall/i;
+
+/**
+ * The class/id and role rules are guesses from a name. They are right for a
+ * sidebar or a share bar, and badly wrong when a theme names its main
+ * wrapper something like `has-sidebar`, `single-post-with-comments` or
+ * `modal-page`: the whole article sat under one "stripped" element and
+ * nothing was read. Real chrome is a small part of the container it sits
+ * in. An element that holds most of the container's text is the content.
+ * @param {Element} el
+ * @param {Element} [container]
+ * @param {string} [name] - the id/class/role text that matched a strip rule
+ * @returns {boolean}
+ */
+function holdsMostOfContainer(el, container, name = '') {
+  if (!container || el === container) return false;
+  if (name && ALWAYS_STRIP_NAME_RE.test(name)) return false;
+  try {
+    if (typeof container.contains === 'function' && !container.contains(el)) return false;
+    const total = containerTextLength(container);
+    if (total < 200) return false; // too little text for a share to mean anything
+    return (el.textContent || '').length >= total * STRIP_MAJORITY_SHARE;
+  } catch {
+    return false;
+  }
+}
+
 export function shouldStripElement(el, container) {
   if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
 
@@ -102,11 +150,11 @@ export function shouldStripElement(el, container) {
   if (STRIP_TAGS.has(el.tagName)) return true;
 
   const role = el.getAttribute ? el.getAttribute('role') : null;
-  if (role && STRIP_ROLE_RE.test(role.trim())) return true;
+  if (role && STRIP_ROLE_RE.test(role.trim())) return !holdsMostOfContainer(el, container, role);
 
   const className = typeof el.className === 'string' ? el.className : '';
   const idAndClass = `${el.id || ''} ${className}`.trim();
-  if (idAndClass && STRIP_CLASS_ID_RE.test(idAndClass)) return true;
+  if (idAndClass && STRIP_CLASS_ID_RE.test(idAndClass)) return !holdsMostOfContainer(el, container, idAndClass);
 
   return false;
 }
@@ -171,6 +219,74 @@ export function scoreContainer(el) {
   return textLength * 0.25 + paragraphCount * 25 + commaCount * 3 - linkDensity * textLength * 0.9;
 }
 
+/** A <p> shorter than this is a caption, a byline or a button label. */
+const CLUSTER_MIN_PARAGRAPH_CHARS = 80;
+/** Cap on <p> elements inspected, so a huge page cannot stall activation. */
+const CLUSTER_MAX_PARAGRAPHS = 600;
+/** A selector-based winner holding at least this share of the page's long
+ * paragraphs is trusted as-is. */
+const CLUSTER_TRUST_SHARE = 0.5;
+/** A paragraph cluster must hold at least this share to replace it. */
+const CLUSTER_TAKEOVER_SHARE = 0.6;
+
+/**
+ * Where the page's long paragraphs live, for pages the selector list above
+ * does not describe: div-only layouts with no <article>/<main>, or a page
+ * whose `.content` class sits on a small box while the essay is elsewhere.
+ *
+ * Classic Readability idea: every long <p> votes for its parent (full
+ * weight) and grandparent (half weight). The elements with the most votes
+ * are the tightest wrappers around the prose.
+ * @param {Document} doc
+ * @returns {{ candidates: Element[], longParagraphs: Element[] }}
+ */
+function findParagraphClusters(doc) {
+  /** @type {Element[]} */
+  let paragraphs = [];
+  try {
+    paragraphs = Array.from(doc.querySelectorAll('p')).slice(0, CLUSTER_MAX_PARAGRAPHS);
+  } catch {
+    paragraphs = [];
+  }
+
+  const votes = new Map();
+  const longParagraphs = [];
+  for (const p of paragraphs) {
+    const length = (p.textContent || '').trim().length;
+    if (length < CLUSTER_MIN_PARAGRAPH_CHARS) continue;
+    longParagraphs.push(p);
+
+    const parent = p.parentElement;
+    if (!parent) continue;
+    votes.set(parent, (votes.get(parent) || 0) + length);
+    const grandparent = parent.parentElement;
+    if (grandparent) votes.set(grandparent, (votes.get(grandparent) || 0) + length / 2);
+  }
+
+  const root = doc.documentElement;
+  const candidates = Array.from(votes.entries())
+    .filter(([el]) => el !== doc.body && el !== root)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([el]) => el);
+
+  return { candidates, longParagraphs };
+}
+
+/**
+ * @param {Element} el
+ * @param {Element[]} paragraphs
+ * @returns {number} share (0..1) of `paragraphs` that sit inside `el`.
+ */
+function paragraphShare(el, paragraphs) {
+  if (!el || !paragraphs.length) return 0;
+  let inside = 0;
+  for (const p of paragraphs) {
+    if (el.contains(p)) inside++;
+  }
+  return inside / paragraphs.length;
+}
+
 /**
  * Find the single best-scoring candidate container on the page, falling
  * back to `document.body` (or `document.documentElement` if even that is
@@ -220,7 +336,44 @@ export function findBestContainer(doc = document) {
     }
   }
 
-  if (!best || bestScore <= 0) {
+  // Second opinion, only when the selector-based pick looks wrong: it found
+  // nothing, or it holds under half of the page's long paragraphs (the
+  // essay is somewhere else). A pick that already holds most of the prose
+  // is returned untouched, so pages that worked before behave the same.
+  let clusters = { candidates: [], longParagraphs: [] };
+  try {
+    clusters = findParagraphClusters(doc);
+  } catch {
+    clusters = { candidates: [], longParagraphs: [] };
+  }
+  const { longParagraphs } = clusters;
+  const haveWinner = !!best && bestScore > 0;
+
+  if (longParagraphs.length >= 3) {
+    const winnerShare = haveWinner ? paragraphShare(best, longParagraphs) : 0;
+    if (!haveWinner || winnerShare < CLUSTER_TRUST_SHARE) {
+      let bestCluster = null;
+      let bestClusterScore = -Infinity;
+      for (const candidate of clusters.candidates) {
+        if (paragraphShare(candidate, longParagraphs) < CLUSTER_TAKEOVER_SHARE) continue;
+        let score = -Infinity;
+        try {
+          score = scoreContainer(candidate);
+        } catch {
+          score = -Infinity;
+        }
+        if (score > bestClusterScore) {
+          bestClusterScore = score;
+          bestCluster = candidate;
+        }
+      }
+      if (bestCluster && bestClusterScore > 0 && (!haveWinner || bestClusterScore > bestScore)) {
+        return bestCluster;
+      }
+    }
+  }
+
+  if (!haveWinner) {
     return doc.body || doc.documentElement;
   }
 

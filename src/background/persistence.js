@@ -401,6 +401,9 @@ export async function saveSessionSnapshot(session) {
       tabId: session.tabId,
       contentKey: session.contentKey,
       index: session.cursor,
+      // Position inside the current sentence, so a pause that outlives the
+      // service worker can still resume mid-sentence. See Session.playhead.
+      offsetMs: session.playhead && session.playhead.index === session.cursor ? session.playhead.ms : 0,
       status: session.status,
       rate: session.rate,
       updatedAt: Date.now(),

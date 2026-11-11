@@ -108,6 +108,17 @@ class Session {
      * its first ensureOffscreenReady(). See offscreenWasReinitialized(). */
     this.offscreenGeneration = null;
 
+    /** Selection-only read: the last Sentence.index to play before pausing,
+     * or null for an ordinary read. Set by a CONTROL_SEEK that carries
+     * endIndex; cleared by any other seek/skip and by finishBoundedRead(). */
+    this.stopAfterIndex = null;
+
+    /** Where inside the current sentence the audio is, from the offscreen
+     * player's PLAYBACK_TICK: {index, ms}. Used to pick a sentence up
+     * mid-way when its audio has to be sent again after a long pause. See
+     * resumeOffsetFor(). */
+    this.playhead = null;
+
     /** @type {Map<number, number|null>} index -> durationHintMs, cleared once consumed */
     this.durationHints = new Map();
 
@@ -422,7 +433,70 @@ class Session {
    */
   handleControlSeek(payload) {
     const idx = Math.max(0, Math.floor(Number(payload?.index)) || 0);
-    this.seekTo(idx);
+    // endIndex makes this a selection-only read: play idx..endIndex, then
+    // pause. Anything that is not a whole number at or after idx is ignored
+    // and the seek behaves as it always did.
+    const end = Number(payload?.endIndex);
+    const stopAfter = Number.isInteger(end) && end >= idx ? end : null;
+    this.seekTo(idx, { stopAfter });
+  }
+
+  /**
+   * The selected text has been read to its end (PrefetchQueue saw the
+   * offscreen queue run dry at the bound). Pause on the sentence after it,
+   * so the next Play carries on from there.
+   */
+  finishBoundedRead() {
+    const bound = this.stopAfterIndex;
+    this.stopAfterIndex = null;
+    if (bound == null || this.destroyed || this.status === 'stopped') return;
+
+    const next = bound + 1;
+    if (this.exhausted && next >= this.totalSentences) {
+      this.endSession('completed');
+      return;
+    }
+
+    // Offscreen ended the bound sentence and now waits on `next`, so the
+    // two cursors agree again.
+    this.cursor = next;
+    this.playhead = null;
+    this.status = 'paused';
+    offscreenManager.sendToOffscreen(makeEnvelope(MSG.AUDIO_PAUSE, TARGET.OFFSCREEN, this.sessionId, {}));
+    this.emitPlaybackState();
+    this.sendToTab(
+      makeEnvelope(MSG.TOAST, TARGET.CONTENT, this.sessionId, {
+        level: 'info',
+        message: 'Finished the selected text. Press Play to keep reading.',
+      })
+    );
+    persistence.flushProgress(this);
+
+    // Warm the sentences after the selection while paused, same as
+    // markReady() does at session start.
+    this.prefetchQueue.fill();
+  }
+
+  /**
+   * Offset (ms) at which offscreen should start sentence `index`, or 0 to
+   * start at its first word.
+   *
+   * Non-zero only for the sentence the playhead is inside. That sentence is
+   * dispatched a second time in exactly one situation: its audio was lost
+   * (Chrome closed the idle offscreen document during a pause, or the
+   * service worker restarted). A skip or seek clears the playhead first, so
+   * those always start a sentence from the top. If offscreen still holds
+   * the sentence, it ignores the duplicate and this value is never used.
+   * @param {number} index
+   * @returns {number}
+   */
+  resumeOffsetFor(index) {
+    const head = this.playhead;
+    if (!head || head.index !== index || index !== this.cursor) return 0;
+    // Under a second in, restarting the sentence is cleaner than seeking.
+    if (!(head.ms > 1000)) return 0;
+    // Step back a little so the first word heard is whole.
+    return Math.max(0, Math.round(head.ms - 250));
   }
 
   /**
@@ -447,8 +521,11 @@ class Session {
    * where audio events could move the cursor forward again and undo the
    * navigation).
    * @param {number} newIndex
+   * @param {{stopAfter?: number|null}} [opts] - stopAfter makes this a
+   *   selection-only read (see stopAfterIndex). Every seek without it
+   *   returns the session to an ordinary, unbounded read.
    */
-  seekTo(newIndex) {
+  seekTo(newIndex, opts = {}) {
     // Seeking past the end of finished content would leave the prefetch queue
     // waiting on a sentence that can never arrive (`exhausted` means no
     // APPEND_UNITS is coming), stranding the session in 'buffering' forever.
@@ -459,6 +536,10 @@ class Session {
 
     this.cursor = target;
     this.seekGeneration++;
+    // A seek always starts its target sentence from the first word.
+    this.playhead = null;
+    this.stopAfterIndex =
+      Number.isInteger(opts.stopAfter) && opts.stopAfter >= target ? opts.stopAfter : null;
 
     // AUDIO_FLUSH must actually reach a live offscreen document. Sending it
     // blind (as this used to) silently vanishes into safeSendRuntimeMessage's
@@ -548,6 +629,7 @@ class Session {
     }
 
     this.cursor = payload.index;
+    if (this.playhead && this.playhead.index !== payload.index) this.playhead = null;
     const sentence = this.sentences[payload.index];
     const unit = sentence ? this.unitMeta.get(sentence.unitId) : null;
 
@@ -583,6 +665,7 @@ class Session {
    */
   handleSentenceEnded(payload) {
     this.durationHints.delete(payload.index);
+    if (this.playhead && this.playhead.index === payload.index) this.playhead = null;
     this.prefetchQueue.onSentenceEnded(payload.index);
   }
 
@@ -590,8 +673,18 @@ class Session {
    * @param {import('../shared/types.js').PlaybackTickPayload} _payload
    */
   handlePlaybackTick(_payload) {
-    // PlaybackState has no currentTimeMs field to surface this through, and
-    // nothing else in the contract consumes ticks background-side today.
+    const index = _payload?.index;
+    const ms = Number(_payload?.currentTimeMs);
+    if (typeof index !== 'number' || index !== this.cursor || !Number.isFinite(ms)) return;
+    this.playhead = { index, ms };
+
+    // Offscreen sends one last tick as it pauses (see AudioQueue.pause()).
+    // handleControlPause() already wrote the snapshot a moment before that
+    // tick arrived, so write it again with the exact position. This is the
+    // copy a restarted service worker reads back.
+    if (this.status === 'paused' && !this.destroyed) {
+      persistence.saveSessionSnapshot(this);
+    }
   }
 
   /**
@@ -795,6 +888,9 @@ async function recoverSessionForTab(tabId) {
   recovered.contentKey = snapshot.contentKey;
   recovered.cursor = snapshot.index;
   recovered.rate = snapshot.rate;
+  if (Number(snapshot.offsetMs) > 0) {
+    recovered.playhead = { index: snapshot.index, ms: Number(snapshot.offsetMs) };
+  }
   // Re-establish as 'paused' -- never auto-resume audio off a bare SW
   // restart. This just unblocks the next CONTROL_* (e.g. the user pressing
   // play again) or the existing CONTENT_READY -> RESUME_AVAILABLE prompt

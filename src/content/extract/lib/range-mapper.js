@@ -83,7 +83,64 @@ const BLOCK_LEVEL_TAGS = new Set([
  * @returns {boolean}
  */
 function defaultShouldDescend(el) {
-  return !DEFAULT_SKIP_TAGS.has(el.tagName);
+  if (DEFAULT_SKIP_TAGS.has(el.tagName)) return false;
+  return !isNonProseElement(el);
+}
+
+// Elements whose text is never part of the prose: drawings, form controls
+// and media fallbacks. An inline chart read its axis labels aloud as a
+// sentence; a <video> read "Your browser does not support the video tag".
+// SVG elements report a lowercase tagName in HTML documents, hence the
+// toUpperCase() in isNonProseElement().
+const NON_PROSE_TAGS = new Set(['SVG', 'CANVAS', 'VIDEO', 'AUDIO', 'OBJECT', 'SELECT', 'TEXTAREA', 'INPUT', 'OPTION']);
+
+// A <button> at or under this many characters is a control label ("Share",
+// "Copy code", "Subscribe", "Read more"). Longer button text is kept: FAQ
+// and accordion pages put the whole question inside a <button>.
+const BUTTON_LABEL_MAX_CHARS = 24;
+
+// Footnote and citation markers: "[1]", "12", "[a]", "[citation needed]".
+const FOOTNOTE_MARKER_TEXT_RE = /^\s*\[?\s*(?:\d{1,3}(?:\s*[,\u2013-]\s*\d{1,3})*|[a-z]|citation needed|edit|note \d+)\s*\]?\s*$/i;
+const FOOTNOTE_CLASS_ID_RE = /\b(footnote[-_]?(?:anchor|ref|link)|fn[-_]?ref|reference|cite[-_]?ref|citation|mw-editsection|mw-cite-backlink)\b/i;
+
+/**
+ * Inline noise that sits INSIDE real paragraphs and headings, where the
+ * block-level strip rules in readability-lite.js never look. Without this a
+ * Wikipedia heading was read as "History edit" and every cited sentence
+ * ended in a spoken number.
+ *
+ * Deliberately narrow. A marker is only dropped when two things agree: the
+ * element is the kind that carries markers (a <sup>, or anything whose
+ * class/id names it a footnote/citation/edit link) AND its whole text looks
+ * like a marker. A plain exponent such as x<sup>2</sup> has no link and no
+ * such class, so it is kept.
+ * @param {Element} el
+ * @returns {boolean}
+ */
+function isNonProseElement(el) {
+  try {
+    const tag = typeof el.tagName === 'string' ? el.tagName.toUpperCase() : '';
+    if (!tag) return false;
+    if (NON_PROSE_TAGS.has(tag)) return true;
+
+    if (tag === 'BUTTON') {
+      return (el.textContent || '').trim().length <= BUTTON_LABEL_MAX_CHARS;
+    }
+
+    const className = typeof el.className === 'string' ? el.className : '';
+    const idAndClass = `${el.id || ''} ${className}`.trim();
+    const namedAsMarker = !!idAndClass && FOOTNOTE_CLASS_ID_RE.test(idAndClass);
+
+    if (tag === 'SUP' || tag === 'A' || tag === 'SPAN') {
+      const hasLink =
+        tag === 'A' || (typeof el.querySelector === 'function' && !!el.querySelector('a'));
+      const markerCarrier = namedAsMarker || (tag === 'SUP' && hasLink);
+      if (markerCarrier && FOOTNOTE_MARKER_TEXT_RE.test(el.textContent || '')) return true;
+    }
+  } catch {
+    // A node that cannot be inspected is treated as ordinary content.
+  }
+  return false;
 }
 
 /**

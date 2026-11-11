@@ -83,16 +83,28 @@ export const SELECTORS = Object.freeze({
    * own extraction (see lib/x-article-parser.js). Absent on every normal
    * tweet/timeline page, so always optional.
    */
-  articleReadView: { selector: 'article[data-testid="twitterArticleReadView"]', optional: true },
+  articleReadView: {
+    selector: 'article[data-testid="twitterArticleReadView"], article:has(.x-article-body)',
+    optional: true,
+  },
 
   /** The article's own title, distinct from `document.title`. */
-  articleTitle: { selector: '[data-testid="twitter-article-title"]', optional: true },
+  articleTitle: {
+    selector: '[data-testid="twitter-article-title"], h1.font-article',
+    optional: true,
+  },
 
   /** Wraps the actual body content (paragraphs, images, headings). */
-  articleRichText: { selector: '[data-testid="twitterArticleRichTextView"]', optional: true },
+  articleRichText: {
+    selector: '[data-testid="twitterArticleRichTextView"], .x-article-body',
+    optional: true,
+  },
 
   /** The direct ancestor of the real sibling-block list inside articleRichText. */
-  articleRichTextComponent: { selector: '[data-testid="longformRichTextComponent"]', optional: true },
+  articleRichTextComponent: {
+    selector: '[data-testid="longformRichTextComponent"], .x-article-body > div',
+    optional: true,
+  },
 });
 
 /**

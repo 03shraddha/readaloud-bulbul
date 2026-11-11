@@ -630,7 +630,11 @@ async function singletonControl(type, payload) {
         target = null;
       }
       if (target && Number.isInteger(target.index)) {
-        sendControl(MSG.CONTROL_SEEK, { index: target.index });
+        // endIndex (when the selection has a clear end) makes the session
+        // read only the selected sentences and then pause.
+        const seek = { index: target.index };
+        if (Number.isInteger(target.endIndex)) seek.endIndex = target.endIndex;
+        sendControl(MSG.CONTROL_SEEK, seek);
         sendControl(MSG.CONTROL_PLAY, {});
         return;
       }

@@ -30,11 +30,16 @@ import { createLogger } from '../shared/logger.js';
 import { synthesizeSentence } from './tts-client.js';
 import * as offscreenManager from './offscreen-manager.js';
 import * as persistence from './persistence.js';
+import { audioCacheKey, getOrSynthesize, pruneInFlight, abortInFlight } from './audio-cache.js';
 
 const log = createLogger('background:prefetch');
 
 /** If REQUEST_MORE_UNITS goes unanswered this long, give up and end the session. */
 const STALL_TIMEOUT_MS = 15000;
+
+/** On a reset, requests this many sentences behind the new position keep
+ * running (they finish into the audio cache, ready for a skip back). */
+const KEEP_BEHIND = 2;
 
 export class PrefetchQueue {
   /**
@@ -42,8 +47,14 @@ export class PrefetchQueue {
    */
   constructor(session) {
     this.session = session;
-    /** @type {Map<number, AbortController>} */
+    /** @type {Map<number, object>} index -> token of the launchFetch() call
+     * that owns it. The token (not the index) identifies the call, so a
+     * stale call from before a reset can never remove a newer call's entry. */
     this.inFlight = new Map();
+    /** Bumped on every reset/stop. A launchFetch() that wakes up under a
+     * different epoch was superseded: its audio still lands in the cache,
+     * but it must not dispatch anything. */
+    this.epoch = 0;
     /** @type {number[]} indices dispatched to offscreen, not yet SENTENCE_ENDED */
     this.dispatched = [];
     /** @type {Set<number>} indices confirmed to never be synthesizable this session */
@@ -74,7 +85,7 @@ export class PrefetchQueue {
    * @param {number} fromIndex
    */
   reset(fromIndex) {
-    this.abortAll();
+    this.abortAll(fromIndex);
     this.dispatched = [];
     this.deadIndices.clear();
     this.nextToFetch = fromIndex;
@@ -97,20 +108,36 @@ export class PrefetchQueue {
   /** Abort everything and stop refilling (session stop/end). */
   stop() {
     this.stopped = true;
-    this.abortAll();
+    this.epoch += 1;
+    this.inFlight.clear();
+    abortInFlight(this.session.sessionId);
     this.dispatched = [];
     this.clearStallTimer();
   }
 
-  abortAll() {
-    for (const controller of this.inFlight.values()) {
-      try {
-        controller.abort();
-      } catch {
-        /* ignore */
-      }
-    }
+  /**
+   * Forget every request this queue is waiting on and rebase around
+   * `aroundIndex`. The HTTP requests themselves are NOT all aborted:
+   * anything close to the new position keeps running and finishes into the
+   * audio cache (see audio-cache.js), so a skip of one or two sentences
+   * reuses work already on the wire instead of starting it again. Only
+   * requests far from the new position are aborted.
+   * @param {number} [aroundIndex]
+   */
+  abortAll(aroundIndex = this.nextToFetch) {
+    this.epoch += 1;
     this.inFlight.clear();
+    pruneInFlight(this.session.sessionId, aroundIndex - KEEP_BEHIND, aroundIndex + PREFETCH_AHEAD + 1);
+  }
+
+  /**
+   * True when a selection-only read (Session.stopAfterIndex) has nothing
+   * left to fetch: every sentence up to the bound was fetched or is dead.
+   * @returns {boolean}
+   */
+  boundReached() {
+    const bound = this.session.stopAfterIndex;
+    return bound != null && this.nextToFetch > bound;
   }
 
   clearStallTimer() {
@@ -188,7 +215,7 @@ export class PrefetchQueue {
       makeEnvelope(MSG.AUDIO_FLUSH, TARGET.OFFSCREEN, session.sessionId, { fromIndex: resumeFrom })
     );
 
-    this.abortAll();
+    this.abortAll(resumeFrom);
     // AUDIO_FLUSH drops everything offscreen was holding, including whatever
     // was playing, so no dispatched index will ever report SENTENCE_ENDED —
     // keeping any of them here would permanently inflate queuedAhead and
@@ -211,6 +238,26 @@ export class PrefetchQueue {
       return;
     }
 
+    // Same reasoning for a selection-only read whose last sentence was the
+    // dead one: the flush leaves offscreen empty and silent, so the
+    // QUEUE_DRAINED that normally closes the selection never comes.
+    if (this.boundReached()) {
+      session.finishBoundedRead();
+      return;
+    }
+
+    // The session cursor can still sit on (or before) the dead index: at
+    // the first Play, or right after a seek, nothing has started yet to
+    // move it. handleSentenceStarted() drops any index above the cursor
+    // while the status is 'buffering', so leaving the cursor behind made
+    // it drop every later sentence too. Audio played, but the widget stayed
+    // on 'buffering' and the highlight never moved. Offscreen is waiting on
+    // `resumeFrom` now, so that is where the cursor belongs.
+    if (session.cursor <= idx) {
+      session.cursor = resumeFrom;
+      session.emitPlaybackState();
+    }
+
     this.fill();
   }
 
@@ -227,6 +274,12 @@ export class PrefetchQueue {
       while (this.deadIndices.has(this.nextToFetch)) this.nextToFetch += 1;
 
       const idx = this.nextToFetch;
+
+      // Selection-only read: never fetch past the last selected sentence.
+      // Offscreen then runs dry there and reports QUEUE_DRAINED, which
+      // handleQueueDrained() turns into a clean pause.
+      if (session.stopAfterIndex != null && idx > session.stopAfterIndex) break;
+
       const sentence = session.sentences[idx];
 
       if (!sentence) {
@@ -313,17 +366,29 @@ export class PrefetchQueue {
    */
   async launchFetch(idx, sentence) {
     const session = this.session;
-    const controller = new AbortController();
-    this.inFlight.set(idx, controller);
+    const epoch = this.epoch;
+    const token = {};
+    this.inFlight.set(idx, token);
+    const release = () => {
+      if (this.inFlight.get(idx) === token) this.inFlight.delete(idx);
+    };
+    const superseded = () => this.stopped || epoch !== this.epoch;
 
     try {
       const settings = persistence.getCachedSettings() || {};
       await offscreenManager.ensureOffscreenReady(session.sessionId, session.rate, session.cursor);
 
-      const result = await synthesizeSentence({ sentence, settings, signal: controller.signal });
+      // Cached audio returns at once; a request already on the wire for this
+      // same sentence is joined, not repeated. See audio-cache.js.
+      const result = await getOrSynthesize({
+        key: audioCacheKey(sentence, settings),
+        index: idx,
+        owner: session.sessionId,
+        synth: (signal) => synthesizeSentence({ sentence, settings, signal }),
+      });
 
-      this.inFlight.delete(idx);
-      if (this.stopped || controller.signal.aborted) return; // dropped by a reset in the meantime
+      release();
+      if (superseded()) return; // dropped by a reset in the meantime
 
       // Synthesis is a multi-second network round trip, and Chrome closes an
       // idle AUDIO_PLAYBACK offscreen document out from under us — which is
@@ -336,7 +401,7 @@ export class PrefetchQueue {
       // audio no longer exists anywhere to end. queuedAhead would stay pinned
       // and fill() would never fetch again.
       await offscreenManager.ensureOffscreenReady(session.sessionId, session.rate, session.cursor);
-      if (this.stopped || controller.signal.aborted) return;
+      if (superseded()) return;
       if (session.offscreenWasReinitialized()) {
         // The replacement document's queue is empty and everything in
         // `dispatched` is unreachable. Rebuild from the playhead rather than
@@ -357,13 +422,20 @@ export class PrefetchQueue {
           mimeType: result.mimeType,
           sampleRate: result.sampleRate,
           durationHintMs: result.durationMs ?? null,
+          // Non-zero only when this is the sentence the reader paused inside
+          // and its audio had to be sent again (the offscreen document was
+          // closed during the pause). Offscreen then starts it at this
+          // offset, not at the first word. See Session.resumeOffsetFor().
+          startAtMs: session.resumeOffsetFor(idx),
         })
       );
 
       this.fill();
     } catch (err) {
-      this.inFlight.delete(idx);
-      if (err?.aborted) return; // aborted due to skip/seek/stop; not a real failure
+      release();
+      // Superseded by a skip/seek/stop, or aborted outright; not a real
+      // failure of this sentence, so it must not be marked dead.
+      if (superseded() || err?.aborted) return;
 
       log.warn(`synth failed for sentence ${sentence.id} (index ${idx}), skipping`, err?.message);
 
@@ -386,7 +458,6 @@ export class PrefetchQueue {
         this.skippedSentenceCount = 0;
       }, 200); // Wait 200ms to batch multiple failures
 
-      if (this.stopped) return;
       this.deadIndices.add(idx);
 
       if (idx === this.expectedOffscreenCursor) {
@@ -420,6 +491,14 @@ export class PrefetchQueue {
     const session = this.session;
     if (this.dispatched.length > 0 || this.inFlight.size > 0) return; // more is already on the way
 
+    // The selection has been read to its last sentence: pause there. Must
+    // come before the end-of-content check, or a selection that happens to
+    // stop short of the last sentence would never be told apart from it.
+    if (this.boundReached() && !this.isExhaustedPastEnd()) {
+      session.finishBoundedRead();
+      return;
+    }
+
     if (this.isExhaustedPastEnd()) {
       session.endSession('completed');
       return;
@@ -436,6 +515,10 @@ export class PrefetchQueue {
    */
   handleBufferLow(queuedCount) {
     const session = this.session;
+    // A selection-only read wants nothing past its bound, so a thin buffer
+    // near that bound is expected. Asking for more units here would start a
+    // scroll hunt on an X timeline for content the reader did not ask for.
+    if (session.stopAfterIndex != null) return;
     if (!session.exhausted) {
       this.requestMoreUnits('buffer-low');
     }

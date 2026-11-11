@@ -136,6 +136,7 @@
  * @property {number} index
  * @property {string} status
  * @property {number} rate
+ * @property {number} [offsetMs] - position inside sentence `index` at the last pause
  * @property {number} updatedAt
  */
 
@@ -176,6 +177,7 @@
 /**
  * @typedef {Object} ControlSeekPayload
  * @property {number} index
+ * @property {number} [endIndex] - selection-only read: play index..endIndex, then pause
  */
 
 /**
@@ -265,6 +267,7 @@
  * @property {string} mimeType
  * @property {number} sampleRate
  * @property {number|null} durationHintMs
+ * @property {number} [startAtMs] - start this clip at an offset (resume mid-sentence)
  */
 
 /**

@@ -190,6 +190,9 @@ export class AudioQueue {
       url,
       mimeType: payload.mimeType,
       durationHintMs: typeof payload.durationHintMs === 'number' ? payload.durationHintMs : null,
+      // Resume mid-sentence: only ever set for a clip re-sent after its
+      // first copy was lost during a pause. See _load().
+      startAtMs: typeof payload.startAtMs === 'number' && payload.startAtMs > 0 ? payload.startAtMs : 0,
     });
 
     this._pump();
@@ -226,6 +229,19 @@ export class AudioQueue {
       // leaving the status pill stuck on 'buffering' forever even though
       // audio is genuinely playing.
       this.current.startedEmitted = false;
+
+      // Report the exact stop position now. Ticks are throttled to one per
+      // TICK_INTERVAL_MS, so the last one can be a quarter second old;
+      // background stores this value to resume mid-sentence if this
+      // document is closed before Play is pressed again.
+      const el = this.current.el;
+      this.onEvent(MSG.PLAYBACK_TICK, {
+        sentenceId: this.current.sentenceId,
+        index: this.current.index,
+        currentTimeMs: (el.currentTime || 0) * 1000,
+        durationMs:
+          Number.isFinite(el.duration) && el.duration > 0 ? el.duration * 1000 : (this.current.durationHintMs ?? 0),
+      });
     }
   }
 
@@ -449,6 +465,27 @@ export class AudioQueue {
     item.startedEmitted = false;
     el.src = item.url;
     this._applyRateToBoth();
+
+    if (item.startAtMs > 0 && typeof el.addEventListener === 'function') {
+      // The seek has to wait for metadata: before that the element has no
+      // duration and silently ignores currentTime. Metadata always arrives
+      // before the first frame plays, so no audio from the top leaks out.
+      const startAtSec = item.startAtMs / 1000;
+      const onMeta = () => {
+        el.removeEventListener('loadedmetadata', onMeta);
+        if (item.el !== el || (this.current !== item && this.preload !== item)) return;
+        const duration = Number.isFinite(el.duration) ? el.duration : 0;
+        // Too close to the end to be worth it; let the sentence replay.
+        if (duration > 0 && startAtSec > duration - 0.4) return;
+        try {
+          el.currentTime = startAtSec;
+        } catch {
+          /* noop: plays from the top */
+        }
+      };
+      el.addEventListener('loadedmetadata', onMeta);
+    }
+
     try {
       el.load();
     } catch {
@@ -475,6 +512,15 @@ export class AudioQueue {
 
     if (playResult && typeof playResult.catch === 'function') {
       playResult.catch((err) => {
+        // play() rejects with AbortError whenever a pause(), a flush or a
+        // new load lands before playback has started. That is the normal
+        // result of a quick Play-then-Pause or a skip, not a failure of the
+        // clip. Reporting it made background mark the sentence dead and
+        // skip past it, so tapping pause quickly could drop a sentence.
+        const interrupted =
+          (err && err.name === 'AbortError') || item !== this.current || !this.wantsPlay;
+        if (interrupted) return;
+
         // Autoplay-policy rejection (or any other play() failure) — report,
         // don't hang silently.
         this.onEvent(MSG.PLAYBACK_ERROR, {

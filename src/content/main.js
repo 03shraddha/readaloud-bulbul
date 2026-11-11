@@ -391,15 +391,16 @@ async function handleHighlightSentence(payload) {
 
 /**
  * Play-from-selection resolver, handed to the widget so its Play button can
- * start reading from wherever the user has selected text on the page. Returns
- * the index of the first extracted sentence at or after the selection start,
- * or null when there's no usable selection (the common case) so Play keeps
- * its normal "start from the cursor / top" behavior.
+ * read just the text the user has selected on the page. Returns the index of
+ * the first and last extracted sentence the selection touches ({index,
+ * endIndex}); the session reads that span and then pauses. Returns null when
+ * there's no usable selection (the common case) so Play keeps its normal
+ * "start from the cursor / top" behavior.
  *
  * Deliberately uses only resolveAnchor(), never ensureVisible(): resolving an
  * anchor is a cheap, side-effect-free Range lookup, whereas ensureVisible()
  * scrolls the page, which must not happen merely from inspecting a selection.
- * @returns {Promise<{index:number}|null>}
+ * @returns {Promise<{index:number, endIndex?:number}|null>}
  */
 async function resolveSelectionStartIndex() {
   if (!activeExtractor || sentenceMap.size === 0) return null;
@@ -425,13 +426,38 @@ async function resolveSelectionStartIndex() {
 
   const startNode = selRange.startContainer;
   const startOffset = selRange.startOffset;
+  const endNode = selRange.endContainer;
+  const endOffset = selRange.endOffset;
 
-  // Sentence indices are monotonic and document-ordered, so the target is the
-  // first sentence whose range either contains the selection start
-  // (comparePoint === 0) or begins after it (comparePoint === -1, i.e. the
-  // selection starts in a gap just before this sentence). resolveAnchor() is
-  // called lazily in order and we stop at that first hit.
+  /**
+   * True when there is real text between two DOM points, in that order.
+   * A plain boundary comparison is not enough: a triple-click selects one
+   * paragraph but puts the selection end at offset 0 of the NEXT block, and
+   * a drag often starts in the whitespace after the previous sentence. Both
+   * touch a neighbouring sentence without selecting a single word of it.
+   */
+  const hasTextBetween = (fromNode, fromOffset, toNode, toOffset) => {
+    try {
+      const probe = document.createRange();
+      probe.setStart(fromNode, fromOffset);
+      probe.setEnd(toNode, toOffset);
+      // setEnd() before the start does not throw; it collapses the range.
+      if (probe.collapsed) return false;
+      return /\S/.test(probe.toString());
+    } catch {
+      return false;
+    }
+  };
+
+  // Sentence indices are monotonic and document-ordered. Walk them in order
+  // and keep every sentence that shares at least one selected word:
+  //   - it ends after the selection starts, and
+  //   - it starts before the selection ends.
+  // The first hit is where reading starts, the last hit is where it stops.
   const ordered = Array.from(sentenceMap.values()).sort((a, b) => a.index - b.index);
+
+  let firstIndex = null;
+  let lastIndex = null;
 
   for (const sentence of ordered) {
     let range = null;
@@ -449,28 +475,36 @@ async function resolveSelectionStartIndex() {
     }
     if (!range) continue;
 
-    let cmp;
-    try {
-      cmp = range.comparePoint(startNode, startOffset);
-    } catch {
-      // Selection point isn't comparable to this range (different tree, stale
-      // node); it just isn't the sentence we're looking for.
-      continue;
+    const endsAfterSelectionStart = hasTextBetween(startNode, startOffset, range.endContainer, range.endOffset);
+    if (!endsAfterSelectionStart) continue; // whole sentence sits before the selection
+
+    const startsBeforeSelectionEnd = hasTextBetween(range.startContainer, range.startOffset, endNode, endOffset);
+    if (!startsBeforeSelectionEnd) {
+      // First sentence past the selection end. Everything after it is
+      // further still, so stop looking.
+      if (firstIndex !== null) break;
+      // The selection sits in a gap before this sentence (an image, a
+      // caption that is not read). Start here; there is no end bound.
+      firstIndex = sentence.index;
+      break;
     }
 
-    if (cmp === 0 || cmp === -1) {
-      // Drop the native selection so it doesn't sit under the reading
-      // highlight that's about to land on the same text.
-      try {
-        selection.removeAllRanges();
-      } catch {
-        /* ignore */
-      }
-      return { index: sentence.index };
-    }
+    if (firstIndex === null) firstIndex = sentence.index;
+    lastIndex = sentence.index;
   }
 
-  return null;
+  if (firstIndex === null) return null;
+
+  // Drop the native selection so it doesn't sit under the reading highlight
+  // that's about to land on the same text.
+  try {
+    selection.removeAllRanges();
+  } catch {
+    /* ignore */
+  }
+
+  // endIndex present => read only the selected sentences, then pause.
+  return lastIndex === null ? { index: firstIndex } : { index: firstIndex, endIndex: lastIndex };
 }
 
 /** Clear whatever highlight is currently applied, if any. */
@@ -600,30 +634,70 @@ function teardown() {
   widgetModule?.unmount?.();
 }
 
+/** X routes that open on top of the page being read and leave it mounted. */
+const X_OVERLAY_PATH_RE = /(\/(photo|video)\/\d+\/?$)|(^\/compose\/)|(^\/intent\/)|(^\/i\/(display|keyboard_shortcuts|flow)\b)/i;
+const X_HOST_RE = /(^|\.)(x|twitter)\.com$/i;
+
+/**
+ * The part of a URL that identifies "which view is this". The hash is left
+ * out everywhere: a table-of-contents link or a scroll-spy that rewrites
+ * `#section` as the reader moves is the same page. The query string is left
+ * out too, except on X (search results live in `?q=`): many sites rewrite
+ * tracking parameters with replaceState while the page is being read, and
+ * that must not end a session.
+ * @param {Location|URL} loc
+ * @returns {string}
+ */
+function navigationKey(loc) {
+  const path = (loc.pathname || '/').replace(/\/+$/, '') || '/';
+  const isX = X_HOST_RE.test(loc.hostname || '');
+  return `${loc.origin}${path}${isX ? loc.search || '' : ''}`;
+}
+
 function watchForSpaNavigation() {
-  // X/Twitter is a pushState SPA. checkUrl only ever runs from the patched
-  // pushState below and the popstate listener, so ordinary same-document
-  // scroll/hash-only DOM activity (which fires neither) can't trigger this;
-  // it only reacts to an actual location.href change, i.e. a real navigation.
+  // SPA route changes (X, Substack's reader, most app-like sites) swap the
+  // view without a page load, so pagehide never fires.
+  //
+  // The pushState patch below is kept, but it cannot be the only signal: a
+  // content script runs in an isolated world with its own `history`
+  // wrapper, so calls the PAGE makes to pushState never pass through the
+  // patched function. With only that patch and popstate, clicking from one
+  // tweet to another went undetected, and the session kept reading and
+  // highlighting against a view that was gone. A cheap poll of the URL
+  // sees every kind of same-document navigation, whichever world made it.
   const checkUrl = () => {
-    if (location.href !== lastUrl) {
-      const previousUrl = lastUrl;
-      lastUrl = location.href;
-      log.debug('SPA navigation detected', { from: previousUrl, to: lastUrl });
+    if (location.href === lastUrl) return;
 
-      // Local teardown alone only clears this content script's own state;
-      // the background session (session.js) has no other way to learn the
-      // view it's reading just disappeared. Tell it via the same CONTROL_STOP
-      // the widget's Stop button sends, so it ends the session the normal
-      // way (SESSION_ENDED/CLEAR_HIGHLIGHT flow back as usual) instead of
-      // being left running against a torn-down view. No-op background-side
-      // if there's no active session (or it belongs to a different tab).
-      if (sessionId) {
-        sendControl(MSG.CONTROL_STOP);
-      }
-
-      teardown();
+    const previousUrl = lastUrl;
+    let previousKey = previousUrl;
+    try {
+      previousKey = navigationKey(new URL(previousUrl));
+    } catch {
+      /* keep the raw href */
     }
+
+    // A photo viewer or the compose box opening over the page being read is
+    // not a navigation away from it: the content underneath stays mounted.
+    // Do not record the overlay URL either, so closing it is a no-op too.
+    if (X_HOST_RE.test(location.hostname) && X_OVERLAY_PATH_RE.test(location.pathname)) return;
+
+    lastUrl = location.href;
+    if (navigationKey(location) === previousKey) return; // hash/query-only change
+
+    log.debug('SPA navigation detected', { from: previousUrl, to: lastUrl });
+
+    // Local teardown alone only clears this content script's own state;
+    // the background session (session.js) has no other way to learn the
+    // view it's reading just disappeared. Tell it via the same CONTROL_STOP
+    // the widget's Stop button sends, so it ends the session the normal
+    // way (SESSION_ENDED/CLEAR_HIGHLIGHT flow back as usual) instead of
+    // being left running against a torn-down view. No-op background-side
+    // if there's no active session (or it belongs to a different tab).
+    if (sessionId) {
+      sendControl(MSG.CONTROL_STOP);
+    }
+
+    teardown();
   };
 
   window.addEventListener('popstate', checkUrl);
@@ -634,6 +708,8 @@ function watchForSpaNavigation() {
     checkUrl();
     return result;
   };
+
+  setInterval(checkUrl, 600);
 }
 
 /**
