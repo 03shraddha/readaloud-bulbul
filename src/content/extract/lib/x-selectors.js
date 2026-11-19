@@ -38,10 +38,15 @@ export const SELECTORS = Object.freeze({
   time: { selector: 'time', optional: false },
 
   /** Tweet body text. Absent for e.g. a poll-only or a media-only tweet. */
-  // New front end: the body is a <span> with these two utility classes.
+  // New front end: the body is the element whose DIRECT children are spans
+  // with these two utility classes. A tweet with a mention, hashtag or link
+  // is split into several sibling spans (text, @mention, text), so matching
+  // the span itself returned only the words before the first mention, and
+  // the second span was mistaken for a quoted tweet. The parent holds the
+  // whole body.
   tweetText: {
     selector:
-      '[data-testid="tweetText"], span[class*="text-[length:inherit]"][class*="text-[color:inherit]"]',
+      '[data-testid="tweetText"], :has(> span[class*="text-[length:inherit]"][class*="text-[color:inherit]"])',
     optional: true,
   },
 
